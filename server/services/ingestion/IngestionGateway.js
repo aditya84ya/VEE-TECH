@@ -16,9 +16,11 @@ import { BseAnnouncementsAdapter } from './providers/BseAnnouncementsAdapter.js'
 import { NewsSitemapAdapter } from './providers/NewsSitemapAdapter.js';
 import { GDELTAdapter } from './providers/GDELTAdapter.js';
 import { GoogleSearchFeedAdapter } from './providers/GoogleSearchFeedAdapter.js';
+import { EpaperOcrAdapter } from './providers/EpaperOcrAdapter.js';
 import { validateEntityContext } from '../mediaMetrics.js';
 import { logTraceEvent, STAGES } from './TraceLogger.js';
 import { evaluateThreatSeverity } from '../threatScorer.js';
+import { validatePostContext } from '../contentValidator.js';
 
 const TARGET_ENTITY_REGEX = /\b(Infosys|TCS|Tata Consultancy Services|Wipro|Accenture|Finacle)\b/i;
 
@@ -54,8 +56,11 @@ export class IngestionGateway {
     });
 
     // Initialize multi-provider pool (including real-time streaming)
+    const epaperOcrAdapter = new EpaperOcrAdapter();
+    const blueskyAdapter = new BlueskyJetstreamAdapter({ ocrAdapter: epaperOcrAdapter });
+
     this.adapters = [
-      new BlueskyJetstreamAdapter(),
+      blueskyAdapter,
       new BseAnnouncementsAdapter(),
       new GuardianAdapter(),
       new GoogleRssAdapter(),
@@ -67,7 +72,8 @@ export class IngestionGateway {
       new GNewsAdapter(),
       new EventRegistryAdapter(),
       new GDELTAdapter(),
-      new GoogleSearchFeedAdapter()
+      new GoogleSearchFeedAdapter(),
+      epaperOcrAdapter
     ];
 
     this.maxArticleAgeHours = options.maxArticleAgeHours || 12;
@@ -84,6 +90,11 @@ export class IngestionGateway {
 
     this.memoryArticles = []; // Latest articles in memory with full contract
     this.isRunning = false;
+  }
+
+  /** Returns the EpaperOcrAdapter instance for on-demand image ingestion */
+  getEpaperOcrAdapter() {
+    return this.adapters.find(a => a.providerName === 'epaper_ocr') || null;
   }
 
   /**
@@ -214,6 +225,17 @@ export class IngestionGateway {
       }
     }, 12000);
 
+    // Group C3: E-Paper OCR adapter -- starts last (Tesseract init is CPU heavy)
+    setTimeout(() => {
+      const epaperAdapter = groupC.find(a => a.providerName === 'epaper_ocr');
+      if (epaperAdapter) {
+        epaperAdapter.start().catch(err =>
+          console.warn(`[IngestionGateway] ⚠️ Failed to start adapter ${epaperAdapter.providerName}:`, err.message)
+        );
+        console.log(`[IngestionGateway] ▶ Group C3 started: epaper_ocr`);
+      }
+    }, 16000);
+
     // Periodically save cursors
     this._cursorInterval = setInterval(() => {
       this.saveCursors();
@@ -271,6 +293,23 @@ export class IngestionGateway {
       return;
     }
 
+    // Guardrail: Two-Stage Pre-Publish AI & Context Validation (Lifestyle, Sports, Out-of-Context Filter)
+    const caption = title || normalized.description || '';
+    const hasImage = Boolean(normalized.image || normalized.mediaUrl);
+    const ocrText = normalized.provider === 'epaper_ocr' ? (normalized.content || '') : (normalized.ocrText || '');
+    const validation = await validatePostContext(caption, ocrText, entity, hasImage);
+    if (!validation.isValid) {
+      this.stats.droppedIrrelevant++;
+      console.log(`[ContentValidator] 🚫 DROPPED FALSE POSITIVE [${entity}]: ${validation.reason} ("${title.slice(0, 60)}")`);
+      logTraceEvent({
+        stage: STAGES.VALIDATED,
+        traceId,
+        provider: normalized.provider,
+        extra: { droppedFalsePositive: true, reason: validation.reason, entity }
+      });
+      return; // Stop here! Do not save to database, do not show on UI.
+    }
+
     // Provider display name mapping
     const providerDisplayNames = {
       bluesky: 'Bluesky Jetstream Firehose (Realtime Stream)',
@@ -282,7 +321,8 @@ export class IngestionGateway {
       currents: 'Currents Global News API',
       gnews: 'GNews AI-Curated Wire',
       eventregistry: 'Event Registry (Minute Stream)',
-      gdelt: 'GDELT 2.0 Global Event Wire'
+      gdelt: 'GDELT 2.0 Global Event Wire',
+      epaper_ocr: 'E-Paper / Image OCR'
     };
 
     // Guardrail: Recency Cutoff Window

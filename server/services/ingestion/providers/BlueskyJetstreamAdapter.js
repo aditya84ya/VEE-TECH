@@ -39,6 +39,10 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
     this.nodeIndex = 0;
     this.reconnectDelay = 2000;
     this.reconnectTimer = null;
+
+    // Optional: injected by IngestionGateway after adapters are instantiated
+    // Allows image embeds in Bluesky posts to be routed to OCR
+    this.ocrAdapter = options.ocrAdapter || null;
   }
 
   async onStart() {
@@ -151,9 +155,28 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
           };
 
           const normalized = this.normalize(rawItem);
-          if (normalized) {
+            if (normalized) {
             this.recordSuccess(1, 1);
             this.emit('article', normalized);
+
+            // If this post carries image embeds AND we have an OCR adapter wired up,
+            // route the image to OCR asynchronously (non-blocking, fire-and-forget).
+            // Only fires when the text already matched TARGET_REGEX so we know it's relevant.
+            if (rawItem.imageUrl && this.ocrAdapter && this.ocrAdapter._worker) {
+              setImmediate(() => {
+                this.ocrAdapter.processMediaUrl(rawItem.imageUrl, {
+                  sourceName: 'Bluesky Image Embed',
+                  sourceUrl: rawItem.postUrl,
+                  postUrl: rawItem.postUrl,
+                  publishedAt: rawItem.createdAt || new Date().toISOString(),
+                  metadata: {
+                    original_media_url: rawItem.imageUrl
+                  }
+                }).catch(err => {
+                  console.warn('[BlueskyJetstream] OCR image route error:', err.message);
+                });
+              });
+            }
           }
         } catch (_) {}
       });
@@ -210,7 +233,10 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
       ingestedAt: now,
       entity: raw.entity || null,
       risk_score: raw.risk_score || (raw.threat?.score ?? 5.0),
-      risk_level: raw.risk_level || raw.threat?.risk_level || 'Medium'
+      risk_level: raw.risk_level || raw.threat?.risk_level || 'Medium',
+      metadata: {
+        original_media_url: raw.imageUrl || null
+      }
     };
   }
 }

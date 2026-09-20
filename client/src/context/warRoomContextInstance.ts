@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Isolated module for the raw WarRoom React context instance and shared types.
  * Kept in a .ts (non-JSX) file so Vite Fast Refresh treats WarRoomContext.tsx
  * as a pure-component file (WarRoomProvider only), eliminating the
@@ -27,6 +27,16 @@ export interface Article {
   briefed_at?: string;
   alerted_at?: string;
   dispatched_at?: string;
+  // OCR-specific metadata (set when api_source includes 'epaper_ocr')
+  ocrConfidence?: number;
+  isLowConfidence?: boolean;
+  matchedTarget?: string;
+  ocrDurationMs?: number;
+  // Optional content/summary aliases
+  summary?: string | string[];
+  description?: string;
+  content?: string;
+  snippet?: string;
 }
 
 export interface WarRoomContextValue {

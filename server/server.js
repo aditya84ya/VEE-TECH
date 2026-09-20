@@ -34,6 +34,13 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config();
 
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL] Uncaught exception:', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[CRITICAL] Unhandled rejection:', reason?.message || reason);
+});
+
 // ============================================================================
 // 1. INITIALIZATION & SETUP
 // ============================================================================
@@ -1592,6 +1599,75 @@ app.get('/api/debug/triage-stats', (_req, res) => {
     cycleTriageStats,
     droppedDuplicatePairs: droppedDuplicatePairs.slice(-20)
   });
+});
+
+// ============================================================================
+// 5b. E-PAPER / IMAGE OCR ON-DEMAND INGESTION ROUTE
+// ============================================================================
+
+/**
+ * POST /api/ocr/ingest-test
+ * Accepts a public image or PDF URL, runs it through EpaperOcrAdapter.processMediaUrl(),
+ * and returns the extracted metadata + triage status.
+ *
+ * Body: { imageUrl: string, sourceName?: string, publishedAt?: string }
+ */
+app.post('/api/ocr/ingest-test', async (req, res) => {
+  const { imageUrl, sourceName, publishedAt } = req.body || {};
+
+  if (!imageUrl || typeof imageUrl !== 'string') {
+    return res.status(400).json({ success: false, error: 'imageUrl is required (string)' });
+  }
+
+  const epaperAdapter = ingestionGateway?.getEpaperOcrAdapter?.();
+  if (!epaperAdapter) {
+    return res.status(503).json({ success: false, error: 'EpaperOcrAdapter not registered in gateway' });
+  }
+
+  if (!epaperAdapter._worker) {
+    return res.status(503).json({
+      success: false,
+      error: 'Tesseract OCR worker not yet ready. Gateway starts it 16s after boot. Retry shortly.'
+    });
+  }
+
+  try {
+    console.log(`[API /api/ocr/ingest-test] Processing image: ${imageUrl}`);
+    const result = await epaperAdapter.processMediaUrl(imageUrl, {
+      sourceName: sourceName || 'API Test Submission',
+      publishedAt: publishedAt || new Date().toISOString()
+    });
+
+    if (!result) {
+      return res.status(200).json({
+        success: false,
+        dropped: true,
+        reason: 'Article dropped by guardrail (no target entity found, low confidence, or duplicate).',
+        imageUrl
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      imageUrl,
+      article: {
+        title:          result.title,
+        provider:       result.provider,
+        publisher:      result.publisher,
+        ocrConfidence:  result.ocrConfidence,
+        ocrDurationMs:  result.ocrDurationMs,
+        isLowConfidence: result.isLowConfidence,
+        matchedTarget:  result.matchedTarget,
+        contentLength:  result.content?.length || 0,
+        publishedAt:    result.publishedAt,
+        url:            result.url
+      },
+      message: `✅ OCR article emitted for "${result.matchedTarget}" (Confidence: ${result.ocrConfidence?.toFixed(0)}%)`
+    });
+  } catch (err) {
+    console.error('[API /api/ocr/ingest-test] Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ============================================================================

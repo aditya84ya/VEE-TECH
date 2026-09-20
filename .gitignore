@@ -8,3 +8,5 @@ build/
 .DS_Store
 coverage/
 .ingestion_cursors.json
+*.traineddata
+*.traineddata.gz

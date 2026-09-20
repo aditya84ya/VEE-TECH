@@ -129,8 +129,8 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
   onEscalateVoice,
   loading
 }) => {
-  // Primary Tabs Filter: 'all' | 'critical' | 'infosys'
-  const [primaryFilter, setPrimaryFilter] = useState<'all' | 'critical' | 'infosys'>('all');
+  // Primary Tabs Filter: 'all' | 'critical' | 'infosys' | 'visual_ocr'
+  const [primaryFilter, setPrimaryFilter] = useState<'all' | 'critical' | 'infosys' | 'visual_ocr'>('all');
 
   // Secondary Filter States
   const [searchFilter, setSearchFilter] = useState('');
@@ -183,6 +183,26 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
 
   // Expanded intelligence briefs state (mapped by article ID)
   const [expandedBriefs, setExpandedBriefs] = useState<Record<string, boolean>>({});
+
+  // Expanded article summaries state (for [Read more] / [Show less] inline toggle)
+  const [expandedSummaries, setExpandedSummaries] = useState<Record<string, boolean>>({});
+
+  const toggleSummary = (articleId: string) => {
+    setExpandedSummaries((prev) => ({
+      ...prev,
+      [articleId]: !prev[articleId]
+    }));
+  };
+
+  // Expanded article headlines state (for [Read more] / [Show less] inline toggle)
+  const [expandedHeadlines, setExpandedHeadlines] = useState<Record<string, boolean>>({});
+
+  const toggleHeadline = (articleId: string) => {
+    setExpandedHeadlines((prev) => ({
+      ...prev,
+      [articleId]: !prev[articleId]
+    }));
+  };
 
   // Real-time new events notification tracking
   const [scrolledDown, setScrolledDown] = useState(false);
@@ -318,6 +338,17 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
           if (!isCrit) return false;
         }
         if (primaryFilter === 'infosys' && !article.entity_mentioned?.toLowerCase().includes('infosys')) return false;
+        if (primaryFilter === 'visual_ocr') {
+          const apiSrc = (article.api_source || '').toLowerCase();
+          const srcName = (article.source_name || '').toLowerCase();
+          const isOcr =
+            apiSrc.includes('epaper') || apiSrc.includes('ocr') ||
+            srcName.includes('ocr') || srcName.includes('e-paper') || srcName.includes('pdf') ||
+            article.ocrConfidence !== undefined || article.isLowConfidence === true ||
+            Boolean((article as any).metadata?.ocr_confidence) ||
+            Boolean((article as any).metadata?.original_media_url);
+          if (!isOcr) return false;
+        }
 
         // Secondary search
         if (searchFilter.trim()) {
@@ -335,8 +366,8 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
           const currentLevel = (article.risk_level === 'Critical' || (article as any).severity === 'CRITICAL' || Number(article.risk_score || (article as any).score) >= 9.0)
             ? 'Critical'
             : (article.risk_level === 'High' || (article as any).severity === 'HIGH' || Number(article.risk_score || (article as any).score) >= 7.0)
-            ? 'High'
-            : (article.risk_level || 'Medium');
+              ? 'High'
+              : (article.risk_level || 'Medium');
           if (currentLevel !== severityFilter) return false;
         }
 
@@ -360,6 +391,8 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
             if (!apiSrc.includes('bluesky')) return false;
           } else if (sourceFilter === 'GDELT DOC') {
             if (!apiSrc.includes('gdelt')) return false;
+          } else if (sourceFilter === 'E-Paper OCR') {
+            if (!apiSrc.includes('epaper') && !apiSrc.includes('ocr')) return false;
           } else if (sourceFilter === 'Institutional') {
             if (!apiSrc.includes('institutional') && !apiSrc.includes('et') && !apiSrc.includes('publisher')) return false;
           }
@@ -418,6 +451,21 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
   const criticalCount = articles.filter((a) => a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0)).length;
   const highCount = articles.filter((a) => !((a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0))) && (a.risk_level === 'High' || (a as any).severity === 'HIGH' || (Number(a.risk_score || (a as any).score) >= 7.0))).length;
   const othersCount = Math.max(0, totalEvents - criticalCount - highCount);
+
+  // Visual/OCR tab badge count
+  const visualOcrCount = useMemo(() => {
+    return articles.filter(a => {
+      const apiSrc = (a.api_source || '').toLowerCase();
+      const srcName = (a.source_name || '').toLowerCase();
+      return (
+        apiSrc.includes('epaper') || apiSrc.includes('ocr') ||
+        srcName.includes('ocr') || srcName.includes('e-paper') || srcName.includes('pdf') ||
+        a.ocrConfidence !== undefined || a.isLowConfidence === true ||
+        Boolean((a as any).metadata?.ocr_confidence) ||
+        Boolean((a as any).metadata?.original_media_url)
+      );
+    }).length;
+  }, [articles]);
 
   // Detection Performance aggregate metrics across real timestamps in operational live window
   const latencyMetrics = useMemo(() => {
@@ -513,33 +561,40 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-lg shadow-2xs self-start md:self-auto">
           <button
             onClick={() => setPrimaryFilter('all')}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
-              primaryFilter === 'all'
-                ? 'bg-slate-900 text-white shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${primaryFilter === 'all'
+              ? 'bg-slate-900 text-white shadow-2xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
           >
             All Stream ({articles.length})
           </button>
           <button
             onClick={() => setPrimaryFilter('critical')}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
-              primaryFilter === 'critical'
-                ? 'bg-slate-900 text-white shadow-2xs'
-                : 'text-slate-600 hover:text-rose-600 hover:bg-rose-50'
-            }`}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${primaryFilter === 'critical'
+              ? 'bg-slate-900 text-white shadow-2xs'
+              : 'text-slate-600 hover:text-rose-600 hover:bg-rose-50'
+              }`}
           >
             Critical Only ({criticalCount})
           </button>
           <button
             onClick={() => setPrimaryFilter('infosys')}
-            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
-              primaryFilter === 'infosys'
-                ? 'bg-slate-900 text-white shadow-2xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${primaryFilter === 'infosys'
+              ? 'bg-slate-900 text-white shadow-2xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
           >
             Infosys Only ({targetCounts.Infosys || 0})
+          </button>
+          <button
+            onClick={() => setPrimaryFilter('visual_ocr')}
+            className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${primaryFilter === 'visual_ocr'
+              ? 'bg-emerald-700 text-white shadow-2xs'
+              : 'text-slate-600 hover:text-emerald-700 hover:bg-emerald-50'
+              }`}
+          >
+            <ImageIcon className="w-3 h-3" />
+            Images / E-Paper ({visualOcrCount})
           </button>
         </div>
       </div>
@@ -602,6 +657,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
           <option value="The Guardian">The Guardian API</option>
           <option value="Bluesky Social">Bluesky Social (Trial)</option>
           <option value="GDELT DOC">GDELT DOC 2.0 (Standby)</option>
+          <option value="E-Paper OCR">E-Paper / Image OCR</option>
         </select>
 
         {/* Time dropdown */}
@@ -670,10 +726,10 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                 {primaryFilter === 'critical'
                   ? 'No active critical incidents matching filters'
                   : primaryFilter === 'infosys'
-                  ? 'No current Infosys events matching filters'
-                  : sourceFilter.includes('CSE')
-                  ? 'No Google Search Engine (CSE) results returned'
-                  : 'No active incidents matching filters'}
+                    ? 'No current Infosys events matching filters'
+                    : sourceFilter.includes('CSE')
+                      ? 'No Google Search Engine (CSE) results returned'
+                      : 'No active incidents matching filters'}
               </p>
               <p className="text-xs text-slate-500 mt-1">
                 {sourceFilter.includes('CSE')
@@ -724,12 +780,12 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                   ? (article.risk_score / 10).toFixed(1)
                   : article.risk_score.toFixed(1)
                 : (article as any).score
-                ? Number((article as any).score).toFixed(1)
-                : isCritical
-                ? '9.8'
-                : isHigh
-                ? '7.5'
-                : '5.0';
+                  ? Number((article as any).score).toFixed(1)
+                  : isCritical
+                    ? '9.8'
+                    : isHigh
+                      ? '7.5'
+                      : '5.0';
 
               // Severity styles
               let severityBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
@@ -751,11 +807,10 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
               return (
                 <div
                   key={article.id}
-                  className={`rounded-xl border transition-all duration-200 shadow-2xs hover:shadow-xs p-4 sm:p-5 ${
-                    isCritical
-                      ? 'bg-rose-50/20 border-rose-200 border-l-4 border-l-rose-600'
-                      : 'bg-white border-slate-200/90'
-                  } ${isAcknowledged ? 'opacity-65 bg-slate-50/50' : ''}`}
+                  className={`rounded-xl border transition-all duration-200 shadow-2xs hover:shadow-xs p-4 sm:p-5 ${isCritical
+                    ? 'bg-rose-50/20 border-rose-200 border-l-4 border-l-rose-600'
+                    : 'bg-white border-slate-200/90'
+                    } ${isAcknowledged ? 'opacity-65 bg-slate-50/50' : ''}`}
                 >
                   {/* Horizontal Card Layout */}
                   <div className="flex flex-col sm:flex-row gap-4 sm:gap-5 items-start">
@@ -801,7 +856,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                             const src = (article.api_source || '').toLowerCase();
                             // Bluesky Jetstream is a live WebSocket firehose — genuinely real-time
                             const isRealTimeStream = src.includes('bluesky') || src.includes('jetstream') || src.includes('firehose');
-                            // All polling/REST aggregator sources — upstream lag is real and outside our control
+                            // All polling/REST aggregator sources -- upstream lag is real and outside our control
                             const isAggregator = !isRealTimeStream && (
                               src.includes('rss') ||
                               src.includes('google') ||
@@ -812,7 +867,9 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                               src.includes('newsapi') ||
                               src.includes('currents') ||
                               src.includes('event registry') ||
-                              src.includes('gdelt')
+                              src.includes('gdelt') ||
+                              src.includes('epaper') ||
+                              src.includes('ocr')
                             );
                             return (
                               <>
@@ -846,6 +903,18 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                               </>
                             );
                           })()}
+
+                          {/* Low OCR Confidence Badge — amber pill shown for E-Paper OCR articles */}
+                          {(article.isLowConfidence ||
+                            ((article as any).ocrConfidence !== undefined && (article as any).ocrConfidence < 60)) && (
+                              <span
+                                title={`OCR extracted this article from an image. Confidence: ${((article as any).ocrConfidence ?? article.ocrConfidence ?? 0).toFixed(0)}% — text may contain minor recognition errors.`}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px] font-bold tracking-wider border border-amber-300 cursor-help"
+                              >
+                                <ImageIcon className="w-2.5 h-2.5" />
+                                OCR {((article as any).ocrConfidence ?? article.ocrConfidence ?? 0).toFixed(0)}% CONF
+                              </span>
+                            )}
 
                           <span className="text-slate-300">•</span>
                           <span className="flex items-center gap-1 text-emerald-700 font-medium">
@@ -891,15 +960,74 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                         />
                       </div>
 
-                      {/* Headline (Clamped to 2 lines, 17-18px) */}
-                      <h3 className="font-bold text-[17px] text-slate-900 line-clamp-2 leading-snug">
-                        {article.title}
-                      </h3>
+                      {/* Headline with interactive [Read more] / [Show less] toggle */}
+                      {(() => {
+                        const titleText = (article.title || '').trim();
+                        const isExpanded = Boolean(expandedHeadlines[article.id]);
+                        const charLimit = 80;
+                        const isLong = titleText.length > charLimit;
+                        const displayTitle = isLong && !isExpanded ? `${titleText.substring(0, charLimit)}...` : titleText;
 
-                      {/* Summary (Clamped to 2 lines, 13-14px) */}
-                      <p className="text-[13px] text-slate-500 line-clamp-2 leading-relaxed">
-                        {article.five_bullet_summary?.[0] || article.raw_content}
-                      </p>
+                        return (
+                          <h3 className="font-bold text-[17px] text-black leading-snug">
+                            <span>{displayTitle}</span>
+
+                            {isLong && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleHeadline(article.id);
+                                }}
+                                className="ml-1.5 inline-block text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
+                              >
+                                {isExpanded ? '[Show less]' : '[Read more]'}
+                              </button>
+                            )}
+                          </h3>
+                        );
+                      })()}
+
+                      {/* Summary with inline [Read more] / [Show less] toggle */}
+                      {(() => {
+                        const summaryText = typeof article.summary === 'string' ? article.summary : '';
+                        const rawText =
+                          article.five_bullet_summary?.[0] ||
+                          summaryText ||
+                          article.content ||
+                          article.raw_content ||
+                          article.description ||
+                          article.snippet ||
+                          '';
+                        const trimmed = rawText.trim();
+                        const hasPrefix = trimmed.toLowerCase().startsWith('what happened:');
+                        const fullText = hasPrefix ? trimmed.substring('what happened:'.length).trim() : trimmed;
+                        const isExpanded = Boolean(expandedSummaries[article.id]);
+                        const charLimit = 160;
+                        const isLong = fullText.length > charLimit;
+                        const displayText = isLong && !isExpanded ? `${fullText.substring(0, charLimit)}...` : fullText;
+
+                        return (
+                          <div className="mt-1 text-[13px]">
+                            <p className="inline leading-relaxed text-black dark:text-black font-normal">
+                              <span className="font-semibold text-black dark:text-black">What happened: </span>
+                              {displayText}
+                            </p>
+                            {isLong && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSummary(article.id);
+                                }}
+                                className="ml-1.5 inline font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors cursor-pointer"
+                              >
+                                {isExpanded ? '[Show less]' : '[Read more]'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Tags Bar */}
                       <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
@@ -939,7 +1067,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                             </h4>
                             <ul className="space-y-1 text-slate-700 list-disc list-inside marker:text-rose-500 leading-relaxed">
                               {Array.isArray(article.five_bullet_summary) &&
-                              article.five_bullet_summary.length > 0 ? (
+                                article.five_bullet_summary.length > 0 ? (
                                 article.five_bullet_summary.map((b, i) => (
                                   <li key={i} className="pl-0.5">
                                     <span>{b}</span>
@@ -969,6 +1097,13 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                           if (effectiveUrl.startsWith('at://')) {
                             const parts = effectiveUrl.replace('at://', '').split('/');
                             effectiveUrl = `https://bsky.app/profile/${parts[0]}/post/${parts[2] || ''}`;
+                          }
+                          // Fallback: If URL is a Bluesky image CDN URL, route to user profile on bsky.app rather than raw image
+                          if (effectiveUrl.includes('cdn.bsky.app')) {
+                            const didMatch = effectiveUrl.match(/did:plc:[a-z0-9]+/i);
+                            if (didMatch) {
+                              effectiveUrl = `https://bsky.app/profile/${didMatch[0]}`;
+                            }
                           }
                           const isBluesky = effectiveUrl.includes('bsky.app');
                           const isReachable = effectiveUrl && (!unreachableUrls.has(effectiveUrl) || isBluesky);
@@ -1004,11 +1139,10 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                           <button
                             onClick={() => onAcknowledge(article.id)}
                             disabled={isAcknowledged}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                              isAcknowledged
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-default'
-                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 active:bg-slate-100 shadow-2xs'
-                            }`}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${isAcknowledged
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-default'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 active:bg-slate-100 shadow-2xs'
+                              }`}
                           >
                             <Check className="w-3.5 h-3.5" />
                             <span>{isAcknowledged ? 'Acknowledged' : 'Acknowledge'}</span>
