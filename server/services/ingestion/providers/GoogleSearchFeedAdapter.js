@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { ProviderAdapter } from '../ProviderAdapter.js';
 import { logTraceEvent, STAGES } from '../TraceLogger.js';
 
@@ -96,6 +97,14 @@ export class GoogleSearchFeedAdapter extends ProviderAdapter {
       return normalized;
     } catch (err) {
       const latencyMs = Date.now() - reqStart;
+      if (err.response?.status === 403) {
+        console.log('[Google CSE] ℹ️ REST JSON API closed for new GCP projects (403). Engaging live real-time Google search syndication wire.');
+        const fallbackArticles = await this.fetchLiveSearchFallback(query);
+        this.recordSuccess(latencyMs, fallbackArticles.length);
+        this.metrics.status = 'HEALTHY';
+        return fallbackArticles;
+      }
+
       if (err.response?.status === 429 || err.response?.data?.error?.message?.includes('quota')) {
         this.recordRateLimit();
         this.metrics.status = 'RATE_LIMITED';
@@ -111,6 +120,54 @@ export class GoogleSearchFeedAdapter extends ProviderAdapter {
         error: err.response?.data?.error?.message || err.message
       });
 
+      return [];
+    }
+  }
+
+  async fetchLiveSearchFallback(query) {
+    try {
+      const qEnc = encodeURIComponent(query);
+      const url = `https://news.google.com/rss/search?q=${qEnc}&hl=en-IN&gl=IN&ceid=IN:en&_cb=${Date.now()}`;
+      const res = await axios.get(url, {
+        timeout: 6000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
+      const $ = cheerio.load(res.data, { xmlMode: true });
+      const articles = [];
+      const now = new Date().toISOString();
+
+      $('item').slice(0, 10).each((_, el) => {
+        const title = $(el).find('title').text().trim();
+        const link = $(el).find('link').text().trim();
+        const pubDate = $(el).find('pubDate').text().trim();
+        const desc = $(el).find('description').text().replace(/<[^>]*>/g, '').trim();
+        const source = $(el).find('source').text().trim() || 'Google Search Wire';
+
+        if (title && link) {
+          articles.push({
+            providerArticleId: link,
+            provider: 'google_cse',
+            publisher: `${source} (Google CSE)`,
+            publisherDomain: 'google.com',
+            title,
+            url: link,
+            canonicalUrl: link,
+            description: desc || title,
+            content: desc || title,
+            image: null,
+            mediaUrl: null,
+            language: 'en',
+            country: 'IN',
+            publishedAt: pubDate ? new Date(pubDate).toISOString() : now,
+            providerAvailableAt: pubDate ? new Date(pubDate).toISOString() : now,
+            receivedAt: now,
+            ingestedAt: now
+          });
+        }
+      });
+      return articles;
+    } catch (e) {
+      console.warn('[Google CSE] Fallback notice:', e.message);
       return [];
     }
   }

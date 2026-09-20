@@ -138,6 +138,47 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
   const [timeFilter, setTimeFilter] = useState('All');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'fastest' | 'slowest'>('newest');
 
+  // Discrete state arrays & query handlers for CSE and RSS independent feeds
+  const [cseArticles, setCseArticles] = useState<Article[]>([]);
+  const [isCseLoading, setIsCseLoading] = useState<boolean>(false);
+  const [rssArticles, setRssArticles] = useState<Article[]>([]);
+  const [isRssLoading, setIsRssLoading] = useState<boolean>(false);
+
+  // Dedicated source filter handler mapping dropdown selections to backend stream routes
+  const handleSourceFilterChange = async (selectedSource: string) => {
+    setSourceFilter(selectedSource);
+
+    if (selectedSource === 'Google Search Engine (CSE)' || selectedSource === 'Google CSE') {
+      setIsCseLoading(true);
+      try {
+        const response = await axios.get('/api/fetch-cse-stream');
+        const items = Array.isArray(response.data)
+          ? response.data
+          : (response.data?.articles || []);
+        setCseArticles(items);
+      } catch (err: any) {
+        console.error('[CrisisWarRoomView] Failed to fetch live Google CSE stream:', err.message);
+      } finally {
+        setIsCseLoading(false);
+      }
+    } else if (selectedSource === 'Google News RSS' || selectedSource === 'Google News RSS (Verified Wire)') {
+      setIsRssLoading(true);
+      try {
+        const response = await axios.get('/api/fetch-rss-stream');
+        const items = Array.isArray(response.data)
+          ? response.data
+          : (response.data?.articles || []);
+        if (items.length > 0) {
+          setRssArticles(items);
+        }
+      } catch (err: any) {
+        console.warn('[CrisisWarRoomView] Using aggregated cache for RSS wire:', err.message);
+      } finally {
+        setIsRssLoading(false);
+      }
+    }
+  };
+
   // Expanded intelligence briefs state (mapped by article ID)
   const [expandedBriefs, setExpandedBriefs] = useState<Record<string, boolean>>({});
 
@@ -158,44 +199,35 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         checkedUrlsRef.current.add(a.url);
       }
     }
+
     if (urlsToCheck.length === 0) return;
 
-    const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:5000';
+    let isMounted = true;
     axios
-      .post(`${apiBase}/api/validate-links`, { urls: urlsToCheck })
+      .post('/api/validate-link', { urls: urlsToCheck })
       .then((res) => {
-        const results = res.data?.results;
-        if (results) {
-          const newlyUnreachable: string[] = [];
-          for (const [url, reachable] of Object.entries(results)) {
+        if (!isMounted) return;
+        const results = res.data?.results || {};
+        setUnreachableUrls((prev) => {
+          const next = new Set(prev);
+          for (const [u, reachable] of Object.entries(results)) {
             if (reachable === false) {
-              newlyUnreachable.push(url);
+              next.add(u);
             }
           }
-          if (newlyUnreachable.length > 0) {
-            setUnreachableUrls((prev) => {
-              const next = new Set(prev);
-              newlyUnreachable.forEach((u) => next.add(u));
-              return next;
-            });
-          }
-        }
+          return next;
+        });
       })
       .catch((err) => {
         console.warn('[CrisisWarRoomView] Link validation check notice:', err.message);
       });
+
+    return () => {
+      isMounted = false;
+    };
   }, [articles]);
 
-  // Dynamic live ticker: automatically re-renders every 30s so relative times increment naturally without page reload
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTick((t) => t + 1);
-    }, 30000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Monitor user scroll position to avoid disrupting when reading
+  // Track window scrolling to display floating "New Events Detected" pill
   useEffect(() => {
     const handleScroll = () => {
       const isDown = window.scrollY > 250;
@@ -258,9 +290,25 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
     return Array.from(set).sort();
   }, [articles]);
 
-  // Main filtered & sorted stream
+  // Main filtered & sorted stream with dedicated source arrays
   const filteredArticles = useMemo(() => {
-    return articles
+    const isCseSource = sourceFilter === 'Google Search Engine (CSE)' || sourceFilter === 'Google CSE';
+    const isRssSource = sourceFilter === 'Google News RSS' || sourceFilter === 'Google News RSS (Verified Wire)';
+
+    // Swap underlying data array based on selected source
+    let sourceStream: Article[];
+    if (isCseSource) {
+      sourceStream = cseArticles;
+    } else if (isRssSource) {
+      sourceStream = rssArticles.length > 0 ? rssArticles : articles.filter(a => {
+        const apiSrc = (a.api_source || '').toLowerCase();
+        return (apiSrc.includes('google') || apiSrc.includes('rss')) && !apiSrc.includes('cse') && !apiSrc.includes('institutional') && !apiSrc.includes('publisher');
+      });
+    } else {
+      sourceStream = articles;
+    }
+
+    return sourceStream
       .filter((article) => {
         // Primary pill
         if (primaryFilter === 'critical' && article.risk_level !== 'Critical') return false;
@@ -283,8 +331,8 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         // Secondary target
         if (targetFilter !== 'ALL' && article.entity_mentioned !== targetFilter) return false;
 
-        // Secondary source (strictly filters by high-level ingestion engine / api_source)
-        if (sourceFilter !== 'All' && sourceFilter !== 'ALL') {
+        // Secondary source (strictly filters by high-level ingestion engine / api_source for non-CSE / non-RSS)
+        if (!isCseSource && !isRssSource && sourceFilter !== 'All' && sourceFilter !== 'ALL') {
           const apiSrc = (article.api_source || '').toLowerCase();
           if (sourceFilter === 'NewsAPI') {
             if (!apiSrc.includes('newsapi')) return false;
@@ -300,10 +348,6 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
             if (!apiSrc.includes('bluesky')) return false;
           } else if (sourceFilter === 'GDELT DOC') {
             if (!apiSrc.includes('gdelt')) return false;
-          } else if (sourceFilter === 'Google News RSS' || sourceFilter === 'Google CSE') {
-            const matchesGoogle = apiSrc.includes('google') || apiSrc.includes('cse');
-            const isInstitutional = apiSrc.includes('institutional') || apiSrc.includes('mint') || apiSrc.includes('et rss');
-            if (!matchesGoogle || isInstitutional) return false;
           } else if (sourceFilter === 'Institutional') {
             if (!apiSrc.includes('institutional') && !apiSrc.includes('et') && !apiSrc.includes('publisher')) return false;
           }
@@ -355,7 +399,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         }
         return timeB - timeA; // Descending (newest)
       });
-  }, [articles, primaryFilter, searchFilter, severityFilter, targetFilter, sourceFilter, timeFilter, sortOrder]);
+  }, [articles, primaryFilter, searchFilter, severityFilter, targetFilter, sourceFilter, timeFilter, sortOrder, cseArticles, rssArticles]);
 
   // Sidebar Analytics: Live Overview metrics
   const totalEvents = articles.length;
@@ -532,12 +576,12 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         {/* Source dropdown */}
         <select
           value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value)}
-          className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-rose-500 transition-all"
+          onChange={(e) => handleSourceFilterChange(e.target.value)}
+          className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-rose-500 transition-all cursor-pointer"
         >
           <option value="All">Source: All</option>
           <option value="Google News RSS">Google News RSS (Verified Wire)</option>
-          <option value="Google CSE">Google Search Engine (CSE Wire)</option>
+          <option value="Google Search Engine (CSE)">Google Search Engine (CSE)</option>
           <option value="Institutional">Institutional Publisher Wires (ET, Mint, BS)</option>
           <option value="NewsAPI">NewsAPI (Global Aggregator)</option>
           <option value="Currents API">Currents Global News</option>
@@ -587,7 +631,27 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         {/* LEFT COLUMN: Event Stream (~75% -> col-span-8 or 9) */}
         {/* ========================================================= */}
         <div className="lg:col-span-9 space-y-4 min-w-0">
-          {filteredArticles.length === 0 ? (
+          {isCseLoading ? (
+            <div className="text-center py-16 bg-white border border-blue-200 rounded-xl p-8 shadow-xs">
+              <div className="w-8 h-8 border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-base font-semibold text-slate-800">
+                Querying Google Programmable Search Engine (CSE)...
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                Fetching dedicated live search JSON results from /api/fetch-cse-stream
+              </p>
+            </div>
+          ) : isRssLoading ? (
+            <div className="text-center py-16 bg-white border border-emerald-200 rounded-xl p-8 shadow-xs">
+              <div className="w-8 h-8 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-base font-semibold text-slate-800">
+                Fetching Google News RSS Stream...
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                Querying dedicated verified RSS feed from /api/fetch-rss-stream
+              </p>
+            </div>
+          ) : filteredArticles.length === 0 ? (
             <div className="text-center py-16 bg-white border border-slate-200/80 rounded-xl p-8 shadow-2xs">
               <ShieldAlert className="w-10 h-10 text-slate-400 mx-auto mb-3" />
               <p className="text-base font-semibold text-slate-800">
@@ -595,13 +659,23 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                   ? 'No active critical incidents matching filters'
                   : primaryFilter === 'infosys'
                   ? 'No current Infosys events matching filters'
+                  : sourceFilter.includes('CSE')
+                  ? 'No Google Search Engine (CSE) results returned'
                   : 'No active incidents matching filters'}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                {primaryFilter === 'critical' && criticalCount === 0
-                  ? 'Zero critical incidents currently detected by local AI triage engine.'
+                {sourceFilter.includes('CSE')
+                  ? 'Click "Reload Live CSE Stream" to query Google Search Engine again.'
                   : 'Adjust the search query or click "Clear All" to restore the full live stream.'}
               </p>
+              {sourceFilter.includes('CSE') && (
+                <button
+                  onClick={() => handleSourceFilterChange('Google Search Engine (CSE)')}
+                  className="mt-3 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+                >
+                  Reload Live CSE Stream
+                </button>
+              )}
             </div>
           ) : (
             filteredArticles.map((article, idx) => {

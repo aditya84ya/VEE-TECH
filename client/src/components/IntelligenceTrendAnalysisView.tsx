@@ -135,7 +135,9 @@ export const IntelligenceTrendAnalysisView: React.FC<IntelligenceTrendAnalysisVi
         const apiSrc = (a.api_source || '').toLowerCase();
         if (sourceFilter === 'Google News RSS') {
           if (!apiSrc.includes('google') && !apiSrc.includes('rss')) return false;
-          if (apiSrc.includes('publisher') || apiSrc.includes('et') || apiSrc.includes('institutional')) return false;
+          if (apiSrc.includes('cse') || apiSrc.includes('publisher') || apiSrc.includes('et') || apiSrc.includes('institutional')) return false;
+        } else if (sourceFilter === 'Google Search Engine (CSE)') {
+          if (!apiSrc.includes('cse')) return false;
         } else if (sourceFilter === 'GDELT DOC') {
           if (!apiSrc.includes('gdelt')) return false;
         } else if (sourceFilter === 'Institutional') {
@@ -1025,6 +1027,7 @@ export const IntelligenceTrendAnalysisView: React.FC<IntelligenceTrendAnalysisVi
           >
             <option value="All">Source: All</option>
             <option value="Google News RSS">Google News RSS (Verified Wire)</option>
+            <option value="Google Search Engine (CSE)">Google Search Engine (CSE)</option>
             <option value="Institutional">Institutional Publisher Wires (ET, Mint, BS)</option>
             <option value="NewsAPI">NewsAPI (Global Aggregator)</option>
             <option value="Currents API">Currents Global News</option>
