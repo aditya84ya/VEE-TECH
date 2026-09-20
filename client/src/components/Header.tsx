@@ -7,6 +7,7 @@ interface HeaderProps {
   onSimulateCrisis?: () => void;
   isFetchingLive?: boolean;
   isSimulating?: boolean;
+  instagramCooldownSec?: number;
   searchQuery: string;
   onSearchChange: (query: string) => void;
 }
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSimulateCrisis,
   isFetchingLive,
   isSimulating,
+  instagramCooldownSec = 0,
   searchQuery,
   onSearchChange
 }) => {
@@ -79,24 +81,39 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Compact Mobile Fetch Live News Button */}
-          <button
-            onClick={handleFetch}
-            disabled={isLoading}
-            title="Scrape and triage authentic real-world news right now"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
-          >
-            {isLoading ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Fetching...</span>
-              </>
-            ) : (
-              <>
-                <Radio className="w-3.5 h-3.5" />
-                <span>Fetch Live</span>
-              </>
+          <div className="flex items-center gap-1.5">
+            {instagramCooldownSec > 0 && (
+              <span
+                className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0"
+                title={`Instagram rate-limit cooldown: ${instagramCooldownSec}s`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                {instagramCooldownSec}s
+              </span>
             )}
-          </button>
+            <button
+              onClick={handleFetch}
+              disabled={isLoading}
+              title={
+                instagramCooldownSec > 0
+                  ? `Fetch Live News (9 sources active | Instagram on cooldown for ${instagramCooldownSec}s)`
+                  : "Scrape and triage authentic real-world news right now"
+              }
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+            >
+              {isLoading ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Fetching...</span>
+                </>
+              ) : (
+                <>
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>Fetch Live</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -139,24 +156,39 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Primary Action: Red Fetch Live News Button (100% authentic live scraping) */}
-        <button
-          onClick={handleFetch}
-          disabled={isLoading}
-          title="Scrape and triage authentic real-world news right now"
-          className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-sm font-semibold shadow-sm transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          {isLoading ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Fetching Live...</span>
-            </>
-          ) : (
-            <>
-              <Radio className="w-4 h-4" />
-              <span>Fetch Live News</span>
-            </>
+        <div className="flex items-center gap-2">
+          {instagramCooldownSec > 0 && (
+            <span
+              className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-2xs"
+              title="Instagram Graph API rate-limit cooldown active. Other 9 sources continue scraping live."
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              IG Cooldown: {instagramCooldownSec}s
+            </span>
           )}
-        </button>
+          <button
+            onClick={handleFetch}
+            disabled={isLoading}
+            title={
+              instagramCooldownSec > 0
+                ? `Fetch Live News (9 sources active | Instagram on cooldown for ${instagramCooldownSec}s)`
+                : "Scrape and triage authentic real-world news right now (all sources + Instagram)"
+            }
+            className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-sm font-semibold shadow-sm transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            {isLoading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Fetching Live...</span>
+              </>
+            ) : (
+              <>
+                <Radio className="w-4 h-4" />
+                <span>Fetch Live News</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       <GoogleSearchModal

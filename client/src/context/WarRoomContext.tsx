@@ -63,8 +63,18 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [isRealtimeActive, setIsRealtimeActive] = useState<boolean>(false);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [isFetchingLive, setIsFetchingLive] = useState<boolean>(false);
+  const [instagramCooldownSec, setInstagramCooldownSec] = useState<number>(0);
 
   const newestCursorRef = useRef<string>('');
+
+  // Decrement Instagram cooldown countdown every second
+  useEffect(() => {
+    if (instagramCooldownSec <= 0) return;
+    const timer = setInterval(() => {
+      setInstagramCooldownSec((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [instagramCooldownSec]);
 
   // 1. Fetch initial load of articles with exponential backoff
   const fetchArticles = useCallback(async (isInitial = false) => {
@@ -283,6 +293,9 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
     try {
       const resp = await axios.post(`${API_BASE_URL}/api/fetch-live`);
       console.log('[WarRoomProvider] Live authentic news fetched:', resp.data);
+      if (typeof resp.data?.instagramCooldownSec === 'number') {
+        setInstagramCooldownSec(resp.data.instagramCooldownSec);
+      }
       await fetchArticles(false);
     } catch (err: any) {
       console.error('[WarRoomProvider] Fetch live news failed:', err.message);
@@ -326,6 +339,7 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
         isRealtimeActive,
         isSimulating,
         isFetchingLive,
+        instagramCooldownSec,
         fetchArticles,
         acknowledgeArticle,
         fetchLiveNews,

@@ -46,6 +46,7 @@ export interface WarRoomContextValue {
   isRealtimeActive: boolean;
   isSimulating: boolean;
   isFetchingLive: boolean;
+  instagramCooldownSec: number;
   fetchArticles: (isInitial?: boolean) => Promise<void>;
   acknowledgeArticle: (id: string) => Promise<void>;
   fetchLiveNews: () => Promise<void>;

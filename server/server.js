@@ -29,7 +29,12 @@ import { startCSEBackgroundWorker } from './services/csePoller.js';
 import { evaluateThreatSeverity, matchCriticalKeyword, CRITICAL_KEYWORDS } from './services/threatScorer.js';
 
 import path from 'node:path';
+import fs from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+
+const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -205,6 +210,53 @@ export function evaluateAlertRules(triage) {
   };
 }
 
+// ============================================================================
+// EMERGENCY CRITICAL ALERT DISPATCHER (Telegram, Gmail SSL, Phone Call)
+// ============================================================================
+if (!global.dispatchedAlertIds) {
+  global.dispatchedAlertIds = new Set();
+}
+
+export function dispatchCriticalAlert(article) {
+  if (!article) return;
+  const riskScore = Number(article.risk_score || article.score || 0);
+  const riskLevel = String(article.risk_level || article.severity || '').toUpperCase();
+  const isCritical = (riskScore >= 9.0) || (riskLevel === 'CRITICAL');
+
+  // STRICT RULE: Suppress all non-critical alerts (LOW, NORMAL, MEDIUM, HIGH < 9.0)
+  if (!isCritical) {
+    return;
+  }
+
+  const alertKey = String(article.id || article.articleId || article.url || article.title);
+  if (global.dispatchedAlertIds.has(alertKey)) {
+    return;
+  }
+  global.dispatchedAlertIds.add(alertKey);
+
+  const rootScript = path.resolve(__dirname, '..', 'alert_dispatcher.py');
+  const serverScript = path.resolve(__dirname, 'alert_dispatcher.py');
+  const scriptPath = fs.existsSync(rootScript) ? rootScript : serverScript;
+
+  const pythonBin = process.platform === 'win32' ? 'python' : 'python3';
+  const payload = JSON.stringify({
+    title: article.title || 'Critical Threat Alert',
+    bullets: article.five_bullet_summary || article.bullet_points || article.summary || [],
+    url: article.url || article.source_url || article.link || 'https://bsky.app',
+    criticality: 'CRITICAL'
+  });
+
+  console.log(`[CriticalAlert] 🚨 Triggering emergency alert dispatcher for: "${article.title}" (Score: ${riskScore})`);
+
+  const proc = spawn(pythonBin, ['-u', scriptPath, '--json', payload], {
+    cwd: path.dirname(scriptPath),
+    env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' }
+  });
+
+  proc.stdout.on('data', (data) => console.log(data.toString().trim()));
+  proc.stderr.on('data', (data) => console.error(`[Alert Error]: ${data.toString().trim()}`));
+}
+
 // Low-Latency Parallel Ingestion Gateway
 export const ingestionGateway = new IngestionGateway({
   supabase,
@@ -237,6 +289,16 @@ export const ingestionGateway = new IngestionGateway({
         triaged_at: updated.triaged_at || memoryArticles[idx].triaged_at
       };
       console.log(`[Server] 🔄 Synchronized AI triage into memory cache for ID: ${updated.id} (${updated.risk_level} ${updated.risk_score}/10)`);
+    }
+
+    // POST-AI TRIAGE COMPLETION EMERGENCY HOOK:
+    // When Ollama finishes triage and generates 5-bullet summary + score >= 9.0 / CRITICAL,
+    // trigger the multi-channel emergency alert dispatcher immediately!
+    const isCritical = (Number(updated.risk_score) >= 9.0) ||
+                       (String(updated.risk_level || '').toUpperCase() === 'CRITICAL') ||
+                       (String(updated.severity || '').toUpperCase() === 'CRITICAL');
+    if (isCritical) {
+      dispatchCriticalAlert(updated);
     }
   }
 });
@@ -634,6 +696,34 @@ async function insertAlertLogRecord(logPayload) {
   return data;
 }
 
+// ─── CRITICAL ALERT DISPATCHER (Telegram Bot, Gmail SSL, tg-ringer Call) ───
+async function triggerCriticalAlertDispatcher(data) {
+  const rootScript = path.resolve(__dirname, '..', 'alert_dispatcher.py');
+  const serverScript = path.resolve(__dirname, 'alert_dispatcher.py');
+  const targetScript = fs.existsSync(rootScript) ? rootScript : serverScript;
+
+  const payloadStr = JSON.stringify({
+    title: data.title,
+    message: data.five_bullet_summary,
+    url: data.url || '',
+    criticality: 'CRITICAL'
+  });
+
+  console.log(`[CriticalAlert] 🚨 Triggering standalone alert_dispatcher.py for: "${data.title}"`);
+  try {
+    const { stdout, stderr } = await execFileAsync('python', ['-u', targetScript, '--json', payloadStr], {
+      timeout: 30000,
+      env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' }
+    });
+    if (stdout) console.log(stdout.trim());
+    if (stderr) console.warn('[CriticalAlert stderr]', stderr.trim());
+    return { channel: 'critical_dispatcher', success: true };
+  } catch (err) {
+    console.warn(`[CriticalAlert] ⚠️ alert_dispatcher note: ${err.message}`);
+    return { channel: 'critical_dispatcher', success: false, error: err.message };
+  }
+}
+
 // ============================================================================
 // 4. CENTRAL INGESTION PIPELINE (processIngest) WITH DEDUPLICATION
 // ============================================================================
@@ -833,6 +923,16 @@ export async function processIngest(payload) {
   }
   if (requiresVoice || triage.requires_voice_escalation) {
     dispatchPromises.push(triggerVoiceCall(triage.five_bullet_summary, effectiveTitle));
+  }
+
+  // CRITICAL ALERT DISPATCH (Telegram Bot, Gmail SSL, tg-ringer Call)
+  if (triage.risk_level === 'Critical') {
+    dispatchPromises.push(triggerCriticalAlertDispatcher({
+      title: effectiveTitle,
+      five_bullet_summary: triage.five_bullet_summary,
+      url: normalizedUrl || payload?.url || '',
+      criticality: 'CRITICAL'
+    }));
   }
 
   // Execute Fork A (article insert) and Fork B (dispatches) concurrently
@@ -1555,18 +1655,78 @@ app.get('/api/ingestion/diagnostics', (_req, res) => {
   return res.json(ingestionGateway.getDetailedDiagnostics());
 });
 
+// ─── INSTAGRAM MANUAL ON-DEMAND TRIGGER (Zero recurring timers, rate-limited) ───
+let lastInstagramManualFetch = 0;
+const INSTAGRAM_COOLDOWN_MS = 60 * 1000; // 60s safety rate-limit cooldown
+
+async function triggerInstagramManualPass() {
+  const rootScript = path.resolve(__dirname, '..', 'instagram_source.py');
+  const serverScript = path.resolve(__dirname, 'instagram_source.py');
+  const targetScript = fs.existsSync(rootScript) ? rootScript : serverScript;
+
+  try {
+    const { stdout, stderr } = await execFileAsync('python', ['-u', targetScript], {
+      timeout: 60000,
+      env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' }
+    });
+
+    if (stdout) {
+      console.log(stdout.trim());
+    }
+    if (stderr) {
+      console.warn('[InstagramSource stderr]', stderr.trim());
+    }
+
+    const match = stdout.match(/\[RESULT_JSON\](.*)$/m);
+    if (match) {
+      try {
+        return JSON.parse(match[1]);
+      } catch (e) {}
+    }
+    return { provider: 'instagram', status: 'COMPLETED', success: true };
+  } catch (err) {
+    console.error('[InstagramSource] Execution error:', err.message);
+    return { provider: 'instagram', status: 'EXECUTION_FAILED', error: err.message };
+  }
+}
+
 // POST /api/fetch-live - Manual trigger to immediately scrape & ingest authentic live news across all sources
 app.post('/api/fetch-live', async (_req, res) => {
   try {
     console.log('[API] /api/fetch-live triggered: Running on-demand manual fetch across active providers...');
     const results = await ingestionGateway.triggerManualFetch();
+
+    // ─── INSTAGRAM MANUAL TRIGGER (Rate-limited, manual-only, zero recurring timers) ───
+    const now = Date.now();
+    const timeSinceLastIg = now - lastInstagramManualFetch;
+    let igCooldownSec = 0;
+
+    if (timeSinceLastIg < INSTAGRAM_COOLDOWN_MS) {
+      const remainingSec = Math.ceil((INSTAGRAM_COOLDOWN_MS - timeSinceLastIg) / 1000);
+      igCooldownSec = remainingSec;
+      console.log(`[InstagramSource] ⏳ On-demand fetch on cooldown (${remainingSec}s remaining). Skipping Instagram pass.`);
+      results.push({
+        provider: 'instagram',
+        status: 'COOLDOWN',
+        remainingSec,
+        message: `Instagram fetch on cooldown (${remainingSec}s remaining)`
+      });
+    } else {
+      lastInstagramManualFetch = now;
+      igCooldownSec = 60;
+      console.log('[InstagramSource] 📸 Triggering manual on-demand Instagram fetch pass...');
+      const igResult = await triggerInstagramManualPass();
+      results.push(igResult);
+    }
+
     const articles = memoryArticles.slice(0, 30);
     return res.status(200).json({
       success: true,
       timestamp: new Date().toISOString(),
       results,
       count: articles.length,
-      articles
+      articles,
+      instagramCooldownSec: igCooldownSec
     });
   } catch (error) {
     console.error('[API] /api/fetch-live error:', error.message);

@@ -34,6 +34,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     isRealtimeActive,
     isSimulating,
     isFetchingLive,
+    instagramCooldownSec,
     acknowledgeArticle,
     fetchLiveNews,
     simulateCrisis
@@ -71,6 +72,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           onSimulateCrisis={simulateCrisis}
           isFetchingLive={isFetchingLive}
           isSimulating={isSimulating}
+          instagramCooldownSec={instagramCooldownSec}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
         />

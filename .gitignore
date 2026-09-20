@@ -10,3 +10,8 @@ coverage/
 .ingestion_cursors.json
 *.traineddata
 *.traineddata.gz
+__pycache__/
+*.py[cod]
+instagram_state.json
+*.session
+tg_ringer.log
