@@ -562,11 +562,16 @@ function deterministicFallbackTriage(content, title) {
 // 3. DATABASE REPOSITORIES
 // ============================================================================
 async function insertArticleRecord(articlePayload) {
+  // Strip non-schema properties (e.g. score, severity) and ensure risk_score is mapped
+  const { score, severity, ...dbInsertData } = articlePayload;
+  if (score !== undefined && dbInsertData.risk_score === undefined) {
+    dbInsertData.risk_score = score;
+  }
   if (!supabase) {
     memoryArticles.unshift(articlePayload);
     return { ...articlePayload, _dbSuccess: false };
   }
-  const { data, error } = await supabase.from('articles').insert(articlePayload).select().single();
+  const { data, error } = await supabase.from('articles').insert(dbInsertData).select().single();
   if (error) {
     console.error('[Supabase] ❌ Insert Error:', error.message);
     memoryArticles.unshift(articlePayload);
@@ -1084,8 +1089,8 @@ app.get('/api/validate-link', async (req, res) => {
   return res.json(result);
 });
 
-// POST /api/validate-links - Batch validation
-app.post('/api/validate-links', async (req, res) => {
+// POST /api/validate-links & /api/validate-link - Batch validation
+app.post(['/api/validate-links', '/api/validate-link'], async (req, res) => {
   const urls = Array.isArray(req.body.urls) ? req.body.urls.slice(0, 100) : [];
   const results = {};
   await Promise.all(

@@ -106,7 +106,7 @@ export class GoogleSearchFeedAdapter extends ProviderAdapter {
       }
 
       if (err.response?.status === 429 || err.response?.data?.error?.message?.includes('quota')) {
-        this.recordRateLimit();
+        this.recordRateLimit(err);
         this.metrics.status = 'RATE_LIMITED';
       } else {
         this.recordFailure(err);

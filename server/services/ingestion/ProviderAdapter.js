@@ -584,6 +584,26 @@ SKIP_COUNT: ${this.metrics.skippedCooldownCount}`);
   }
 
   /**
+   * Records a rate limit event, updates metrics, and sets a cooldown
+   * @param {Error|number|null} [error] Error object or custom cooldown in ms
+   * @param {number} [cooldownMs=120000] Default cooldown duration in ms
+   */
+  recordRateLimit(error = null, cooldownMs = 120000) {
+    this.metrics.rateLimitedCount = (this.metrics.rateLimitedCount || 0) + 1;
+    this.metrics.rateLimitCount = this.metrics.rateLimitedCount;
+    this.metrics.status = 'RATE_LIMITED';
+    const effectiveCooldown = typeof error === 'number' ? error : cooldownMs;
+    this.cooldownUntil = Math.max(this.cooldownUntil || 0, Date.now() + effectiveCooldown);
+    this.metrics.cooldownUntil = new Date(this.cooldownUntil).toISOString();
+
+    if (error && typeof error === 'object' && error.message) {
+      this.recordFailure(error);
+    } else {
+      console.warn(`[ProviderAdapter:${this.providerName}] ⚠️ Rate limited. Cooling down until ${this.metrics.cooldownUntil}`);
+    }
+  }
+
+  /**
    * Health snapshot for telemetry APIs (Phases 11 & 12)
    */
   getHealth() {

@@ -358,6 +358,8 @@ export class IngestionGateway {
     const threat = evaluateThreatSeverity(title, content, entity);
     const isThreatCritical = threat.risk_level === 'Critical';
 
+    const computedRiskScore = threat.score ?? threat.risk_score ?? normalized.risk_score ?? 5.0;
+
     const articlePayload = {
       id: candidateId,
       api_source: apiSource,
@@ -368,13 +370,11 @@ export class IngestionGateway {
       raw_content: content,
       entity_mentioned: entity,
       sentiment: isThreatCritical ? 'Negative' : (threat.risk_level === 'High' ? 'Negative' : 'Neutral'),
-      risk_score: threat.score,
+      risk_score: computedRiskScore,
       risk_level: threat.risk_level,
-      severity: threat.severity,
-      score: threat.score,
       five_bullet_summary: [
         `Fast-path raw commit from ${pubName}`,
-        `Threat assessment: ${threat.severity} (${threat.score}/10.0)${threat.matchedKeyword ? ` - Triggered by: "${threat.matchedKeyword}"` : ''}`,
+        `Threat assessment: ${threat.severity} (${computedRiskScore}/10.0)${threat.matchedKeyword ? ` - Triggered by: "${threat.matchedKeyword}"` : ''}`,
         `Published: ${publishedAt}`,
         `Awaiting deep AI triage in background queue...`
       ],
@@ -452,6 +452,8 @@ export class IngestionGateway {
     // =========================================================================
     const enrichedRecord = {
       ...committedRecord,
+      severity: threat.severity,
+      score: computedRiskScore,
       traceId,
       storyClusterId: dedup.storyClusterId,
       sourceCount: dedup.sourceCount,
@@ -508,6 +510,17 @@ export class IngestionGateway {
     const results = [];
     for (const adapter of this.adapters) {
       try {
+        if (adapter.fetchMode === 'STREAM') {
+          // Streaming firehose: ensure connected, does not poll REST endpoint
+          if (typeof adapter.pollNow === 'function') await adapter.pollNow();
+          results.push({
+            provider: adapter.providerName,
+            status: adapter.metrics.status || 'CONNECTED',
+            mode: 'STREAM',
+            message: 'Continuous WebSocket firehose active (streaming push)'
+          });
+          continue;
+        }
         const items = await adapter.pollNow();
         results.push({ provider: adapter.providerName, count: items?.length || 0 });
       } catch (err) {

@@ -27,6 +27,8 @@ import { DetectionLatencyBadge } from './DetectionLatencyBadge';
 import { ArticleLifecycleTimeline } from './ArticleLifecycleTimeline';
 import { calculateAggregateLatencyMetrics, calculateSplitLatencyMetrics } from '../utils/detectionLatency';
 
+const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
+
 interface CrisisWarRoomViewProps {
   articles: Article[];
   onAcknowledge: (id: string) => void;
@@ -151,7 +153,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
     if (selectedSource === 'Google Search Engine (CSE)' || selectedSource === 'Google CSE') {
       setIsCseLoading(true);
       try {
-        const response = await axios.get('/api/fetch-cse-stream');
+        const response = await axios.get(`${API_BASE_URL}/api/fetch-cse-stream`);
         const items = Array.isArray(response.data)
           ? response.data
           : (response.data?.articles || []);
@@ -164,7 +166,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
     } else if (selectedSource === 'Google News RSS' || selectedSource === 'Google News RSS (Verified Wire)') {
       setIsRssLoading(true);
       try {
-        const response = await axios.get('/api/fetch-rss-stream');
+        const response = await axios.get(`${API_BASE_URL}/api/fetch-rss-stream`);
         const items = Array.isArray(response.data)
           ? response.data
           : (response.data?.articles || []);
@@ -204,7 +206,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
 
     let isMounted = true;
     axios
-      .post('/api/validate-link', { urls: urlsToCheck })
+      .post(`${API_BASE_URL}/api/validate-link`, { urls: urlsToCheck })
       .then((res) => {
         if (!isMounted) return;
         const results = res.data?.results || {};
