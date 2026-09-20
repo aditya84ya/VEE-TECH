@@ -417,6 +417,19 @@ export class EpaperOcrAdapter extends ProviderAdapter {
     };
   }
 
+  // ─── Public API: recognizeImageBuffer (for manual uploads) ─────────
+  async recognizeImageBuffer(buffer) {
+    await this._ensureWorker();
+    if (!this._worker) {
+      throw new Error('Tesseract OCR worker could not be initialized');
+    }
+    const { data } = await this._worker.recognize(buffer);
+    return {
+      text: (data?.text || '').trim(),
+      confidence: data?.confidence ?? 0
+    };
+  }
+
   // ─── Public API: processMediaUrl (on-demand from Bluesky or API route) ──────
 
   /**

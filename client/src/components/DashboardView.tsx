@@ -553,8 +553,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[9px] uppercase font-bold tracking-wider border border-slate-200">
                             via {article.api_source || 'Google RSS'}
                           </span>
+                          {((article.api_source || '').toLowerCase().includes('manual')) && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[9px] uppercase font-bold tracking-wider border border-purple-300 shadow-2xs">
+                              MANUAL UPLOAD
+                            </span>
+                          )}
                           <span className="text-slate-300">•</span>
-                          <span className="truncate">{relativeTime}</span>
+                          <span className="truncate">{article.published_at ? relativeTime : 'Publish date unknown'}</span>
                         </div>
 
                         {/* Headline (Clamped to 2 lines) */}

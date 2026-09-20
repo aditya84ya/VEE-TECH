@@ -7,6 +7,7 @@ import { CompetitorRadarView } from './components/CompetitorRadarView';
 import { SlaProofEngineView } from './components/SlaProofEngineView';
 import { IntelligenceTrendAnalysisView } from './components/IntelligenceTrendAnalysisView';
 import { IntelligenceSourcesView } from './components/IntelligenceSourcesView';
+import { ManualUploadView } from './components/ManualUploadView';
 import { Article } from './hooks/useWarRoom';
 import { WarRoomProvider } from './context/WarRoomContext';
 import {
@@ -73,6 +74,10 @@ function SlaProofEngineRoute() {
   return <SlaProofEngineView articles={ctx.articles} />;
 }
 
+function ManualUploadRoute() {
+  return <ManualUploadView />;
+}
+
 // 2. Analysis Route
 function AnalysisRoute() {
   const { articles, onSelectArticle } = useOutletContext<OutletContextType>();
@@ -129,7 +134,14 @@ function NewsFeedRoute() {
             className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs hover:shadow-xs transition-all space-y-1.5 cursor-pointer"
           >
             <div className="flex justify-between text-xs text-slate-500">
-              <span className="font-semibold text-slate-700">{art.source_name}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-700">{art.source_name}</span>
+                {((art.api_source || '').toLowerCase().includes('manual')) && (
+                  <span className="px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 text-[9px] uppercase font-bold tracking-wider border border-purple-300">
+                    MANUAL UPLOAD
+                  </span>
+                )}
+              </div>
               <span>Target: <strong className="text-slate-900">{art.entity_mentioned}</strong></span>
             </div>
             <h4 className="text-sm font-bold text-slate-900">{art.title}</h4>
@@ -236,7 +248,11 @@ export default function App() {
             <Route path="/crisis-war-room" element={<CrisisWarRoomRoute />} />
             <Route path="/dashboard/crisis-war-room" element={<CrisisWarRoomRoute />} />
 
-            {/* 3. Competitor Radar */}
+            {/* 3. Manual Intel Upload */}
+            <Route path="/manual-upload" element={<ManualUploadRoute />} />
+            <Route path="/dashboard/manual-upload" element={<ManualUploadRoute />} />
+
+            {/* 4. Competitor Radar */}
             <Route path="/competitor-radar" element={<CompetitorRadarRoute />} />
             <Route path="/dashboard/competitor-radar" element={<CompetitorRadarRoute />} />
 

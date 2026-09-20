@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import multer from 'multer';
+import { PDFParse } from 'pdf-parse';
 import { randomUUID, createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -53,6 +55,12 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:7b';
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.text({ type: ['application/xml', 'text/xml', 'application/atom+xml'], limit: '10mb' }));
+
+// Multer in-memory storage for ephemeral file uploads (never written to disk or permanent storage)
+const uploadMemory = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 } // 25MB max
+});
 
 // Initialize Supabase Client
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -1668,6 +1676,211 @@ app.post('/api/ocr/ingest-test', async (req, res) => {
     console.error('[API /api/ocr/ingest-test] Error:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
+});
+
+/**
+ * POST /api/manual-upload
+ *
+ * Accepts a multipart/form-data upload (or JSON base64) containing an image or PDF.
+ * Performs in-memory OCR / text extraction, checks entity guardrails,
+ * runs the standard AI triageArticle() pipeline, and saves structured
+ * data to the DB.
+ *
+ * STORAGE RULE: The file is NOT persisted to Supabase Storage or local disk.
+ * It exists purely as an ephemeral buffer in memory during the request and is deleted immediately.
+ */
+app.post('/api/manual-upload', uploadMemory.single('file'), async (req, res) => {
+  let fileBuffer = req.file?.buffer;
+  let fileName = req.file?.originalname || 'uploaded_document';
+  let mimeType = req.file?.mimetype || '';
+
+  // Fallback support for JSON base64 uploads
+  if (!fileBuffer && req.body?.fileBase64) {
+    try {
+      fileBuffer = Buffer.from(req.body.fileBase64, 'base64');
+      fileName = req.body.fileName || 'uploaded_document';
+      mimeType = req.body.mimeType || 'image/png';
+    } catch (b64Err) {
+      return res.status(400).json({ success: false, error: 'Invalid base64 document payload' });
+    }
+  }
+
+  if (!fileBuffer || fileBuffer.length === 0) {
+    return res.status(400).json({ success: false, error: 'No file uploaded. Please provide an image or PDF.' });
+  }
+
+  const publicationName = (req.body?.publication_name || '').trim();
+  const pageNumber = (req.body?.page_number || '').trim();
+  const rawPublishDate = req.body?.published_at;
+  const isHistorical = req.body?.is_historical === 'true' || req.body?.is_historical === true || req.body?.is_historical === undefined;
+
+  let extractedText = '';
+  let ocrConfidence = 92; // default high baseline for digital text
+  const isPdf = mimeType.includes('pdf') || fileName.toLowerCase().endsWith('.pdf');
+
+  try {
+    if (isPdf) {
+      console.log(`[Manual Upload] Processing PDF: ${fileName} (${(fileBuffer.length / 1024).toFixed(1)} KB)`);
+      try {
+        const parser = new PDFParse({ data: fileBuffer });
+        const parseResult = await parser.getText();
+        extractedText = (parseResult?.text || '').trim();
+      } catch (pdfErr) {
+        console.warn('[Manual Upload] PDFParse error:', pdfErr.message);
+      }
+
+      // If PDF has no digital text layer, check if we can convert via pdfImgConvert and OCR
+      if (!extractedText || extractedText.length < 25) {
+        const epaperAdapter = ingestionGateway?.getEpaperOcrAdapter?.();
+        if (epaperAdapter) {
+          try {
+            const pages = await epaperAdapter._processPdfBuffer(fileBuffer, 'manual_upload.pdf', publicationName || 'Manual Upload');
+            if (pages && pages.length > 0 && pages[0].ocrText) {
+              extractedText = pages[0].ocrText;
+              ocrConfidence = pages[0].confidence || 75;
+            }
+          } catch (pdfImgErr) {
+            console.warn('[Manual Upload] PDF fallback OCR error:', pdfImgErr.message);
+          }
+        }
+      }
+    } else {
+      // Image OCR branch
+      console.log(`[Manual Upload] Processing image: ${fileName} (${(fileBuffer.length / 1024).toFixed(1)} KB)`);
+      const epaperAdapter = ingestionGateway?.getEpaperOcrAdapter?.();
+      if (!epaperAdapter) {
+        return res.status(503).json({ success: false, error: 'OCR adapter service unavailable.' });
+      }
+
+      const ocrResult = await epaperAdapter.recognizeImageBuffer(fileBuffer);
+      extractedText = (ocrResult?.text || '').trim();
+      ocrConfidence = ocrResult?.confidence ?? 80;
+    }
+  } catch (extractErr) {
+    console.error('[Manual Upload] Text extraction failed:', extractErr.message);
+    return res.status(500).json({ success: false, error: `OCR extraction failed: ${extractErr.message}` });
+  } finally {
+    // IMMEDIATE EPHEMERAL PURGE: dereference buffer completely
+    fileBuffer = null;
+    if (req.file) {
+      delete req.file.buffer;
+    }
+  }
+
+  // Guardrail 1: Minimum text length
+  if (!extractedText || extractedText.length < 15) {
+    return res.status(422).json({
+      success: false,
+      error: 'Insufficient text extracted from document. Please ensure the document is clear, legible, and uncompressed.'
+    });
+  }
+
+  // Guardrail 2: Strict target corporate entity check (Infosys, TCS, Wipro, Accenture)
+  const TARGET_ENTITY_GUARDRAIL = /\b(Infosys|Infosys\s+ADR|NYSE:\s*INFY|TCS|Tata\s+Consultancy(\s+Services)?|Wipro|Wipro\s+ADR|Accenture|Finacle|SEBI|BSE|NSE)\b/i;
+  if (!TARGET_ENTITY_GUARDRAIL.test(extractedText)) {
+    console.warn('[Manual Upload] Dropped: No tracked corporate entities in document');
+    return res.status(422).json({
+      success: false,
+      error: 'No tracked company (Infosys/TCS/Wipro/Accenture) found in this document',
+      extractedLength: extractedText.length,
+      confidence: ocrConfidence
+    });
+  }
+
+  // Guess headline from first substantial line
+  const lines = extractedText.split('\n').map(l => l.trim()).filter(l => l.length >= 8);
+  const guessedTitle = lines[0]
+    ? (lines[0].length < 15 ? `${lines.slice(0, 2).join(' ')}` : lines[0].substring(0, 140))
+    : `[Scanned Intel] Document intelligence report`;
+
+  // Format source name
+  let effectiveSourceName = publicationName || 'Manual Upload';
+  if (pageNumber) {
+    effectiveSourceName = `${effectiveSourceName} (p. ${pageNumber})`;
+  }
+
+  console.log(`[Manual Upload] Running Ollama triage for: "${guessedTitle.slice(0, 50)}..." (${effectiveSourceName})`);
+
+  // Run the SAME triageArticle() pipeline used everywhere else
+  const rawTriage = await triageArticle(extractedText, guessedTitle, effectiveSourceName);
+  const triage = normalizeTriage(rawTriage);
+
+  const nowIso = new Date().toISOString();
+  const parsedPublishedAt = (rawPublishDate && !isNaN(new Date(rawPublishDate).getTime()))
+    ? new Date(rawPublishDate).toISOString()
+    : null; // null if unknown, per requirement!
+
+  const articleId = randomUUID();
+  const correlation_id = `corr_manual_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+  // Construct structured article payload for articles table
+  const articlePayload = {
+    id: articleId,
+    api_source: 'manual_ocr_upload',
+    source_name: effectiveSourceName,
+    title: guessedTitle,
+    url: null,
+    image_url: null, // Zero file storage
+    raw_content: extractedText,
+    entity_mentioned: triage.entity,
+    sentiment: triage.sentiment,
+    risk_score: triage.risk_score,
+    risk_level: triage.risk_level,
+    five_bullet_summary: triage.five_bullet_summary,
+    status: 'ACTIVE',
+    published_at: parsedPublishedAt,
+    ingested_at: nowIso,
+    triaged_at: nowIso,
+    theme: triage.theme || 'Manual Intelligence Upload'
+  };
+
+  // Insert into articles table (Supabase or in-memory fallback)
+  const insertedArticle = await insertArticleRecord(articlePayload);
+
+  // Recency & Content Hash
+  const hashVal = generateContentHash({ title: guessedTitle, url: `manual_${articleId}` });
+  seenContentHashes.add(hashVal);
+
+  // Dispatch rules: Only dispatch live alert if user explicitly opted OUT of historical research
+  if (!isHistorical) {
+    console.log(`[Manual Upload] Non-historical alert active: evaluating emergency notification rules...`);
+    const { channels, requiresVoice } = evaluateAlertRules(triage);
+    if (channels.includes('Slack')) {
+      sendSlackAlert(triage.five_bullet_summary, triage.risk_level, guessedTitle, triage.risk_score).catch(() => {});
+    }
+    if (channels.includes('WhatsApp')) {
+      sendWhatsAppAlert(triage.five_bullet_summary, guessedTitle, triage.risk_score).catch(() => {});
+    }
+    if (channels.includes('Email')) {
+      sendEmailAlert(triage.five_bullet_summary, guessedTitle, triage.risk_score).catch(() => {});
+    }
+    if (requiresVoice || triage.requires_voice_escalation) {
+      triggerVoiceCall(triage.five_bullet_summary, guessedTitle).catch(() => {});
+    }
+  } else {
+    console.log(`[Manual Upload] Historical research mode active — skipping auto-dispatch to phone/Slack/WhatsApp.`);
+  }
+
+  // Attach runtime OCR metadata for the frontend response
+  const responseArticle = {
+    ...insertedArticle,
+    ocrConfidence: Number(ocrConfidence.toFixed(1)),
+    isLowConfidence: ocrConfidence < 60,
+    correlation_id
+  };
+
+  return res.status(200).json({
+    success: true,
+    article: responseArticle,
+    ocr: {
+      extractedText,
+      confidence: Number(ocrConfidence.toFixed(1)),
+      characterCount: extractedText.length
+    },
+    triage,
+    historical: isHistorical,
+    message: `✅ Document successfully OCR-scanned and triaged for "${triage.entity}" (Risk: ${triage.risk_level} ${triage.risk_score}/10)`
+  });
 });
 
 // ============================================================================

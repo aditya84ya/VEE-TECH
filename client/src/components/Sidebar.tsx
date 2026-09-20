@@ -9,7 +9,8 @@ import {
   FileText,
   Newspaper,
   Database,
-  Bell
+  Bell,
+  ScanText
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -31,6 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { path: '/', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/crisis-war-room', label: 'Crisis War Room', icon: AlertTriangle },
+        { path: '/manual-upload', label: 'Manual Intel Upload', icon: ScanText },
         { path: '/competitor-radar', label: 'Competitor Radar', icon: Radio },
         { path: '/sla-proof-engine', label: 'SLA Proof Engine', icon: ShieldCheck }
       ]

@@ -100,10 +100,15 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
             <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 text-[10px] uppercase font-bold tracking-wider border border-slate-200">
               via {article.api_source || 'Google RSS'}
             </span>
+            {((article.api_source || '').toLowerCase().includes('manual')) && (
+              <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] uppercase font-bold tracking-wider border border-purple-300 shadow-2xs">
+                MANUAL UPLOAD
+              </span>
+            )}
             <span>•</span>
             <span className="flex items-center gap-1">
               <Clock className="w-3.5 h-3.5" />
-              {relativeTime}
+              {article.published_at ? relativeTime : 'Publish date unknown'}
             </span>
           </div>
 

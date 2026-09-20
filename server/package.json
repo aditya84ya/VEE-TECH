@@ -16,6 +16,7 @@
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.3",
+    "multer": "^2.4.0",
     "nostr-tools": "^2.25.2",
     "pdf-parse": "^2.4.5",
     "tesseract.js": "^7.0.0",

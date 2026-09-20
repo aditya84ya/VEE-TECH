@@ -851,13 +851,14 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                             {article.source_name || 'News Wire'}
                           </span>
 
-                          {/* API Source Tag + Aggregated vs Direct-Wire indicator */}
+                          {/* API Source Tag + Aggregated vs Direct-Wire vs Manual Upload indicator */}
                           {(() => {
                             const src = (article.api_source || '').toLowerCase();
+                            const isManualUpload = src.includes('manual_ocr_upload') || src.includes('manual') || (article as any).source_type === 'manual_ocr_upload';
                             // Bluesky Jetstream is a live WebSocket firehose — genuinely real-time
-                            const isRealTimeStream = src.includes('bluesky') || src.includes('jetstream') || src.includes('firehose');
+                            const isRealTimeStream = !isManualUpload && (src.includes('bluesky') || src.includes('jetstream') || src.includes('firehose'));
                             // All polling/REST aggregator sources -- upstream lag is real and outside our control
-                            const isAggregator = !isRealTimeStream && (
+                            const isAggregator = !isManualUpload && !isRealTimeStream && (
                               src.includes('rss') ||
                               src.includes('google') ||
                               src.includes('newsdata') ||
@@ -876,6 +877,14 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                                 <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 text-[9px] uppercase font-bold tracking-wider border border-slate-200">
                                   VIA {article.api_source?.toUpperCase() || 'GOOGLE RSS'}
                                 </span>
+                                {isManualUpload && (
+                                  <span
+                                    title="Manual Intel Upload — Scanned document/clipping processed via OCR and AI triage."
+                                    className="px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 text-[9px] uppercase font-bold tracking-wider border border-purple-300 shadow-2xs cursor-help"
+                                  >
+                                    MANUAL UPLOAD
+                                  </span>
+                                )}
                                 {isRealTimeStream && (
                                   <span
                                     title="Bluesky Jetstream WebSocket firehose — genuine real-time push stream. Detection latency is typically seconds from publication."
@@ -892,7 +901,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                                     AGGREGATED
                                   </span>
                                 )}
-                                {!isRealTimeStream && !isAggregator && (
+                                {!isManualUpload && !isRealTimeStream && !isAggregator && (
                                   <span
                                     title="Direct-wire API — lowest upstream lag for this source type."
                                     className="px-1.5 py-0.2 rounded bg-blue-50 text-blue-600 text-[9px] uppercase font-bold tracking-wider border border-blue-200 cursor-help"
@@ -908,11 +917,10 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                           {(article.isLowConfidence ||
                             ((article as any).ocrConfidence !== undefined && (article as any).ocrConfidence < 60)) && (
                               <span
-                                title={`OCR extracted this article from an image. Confidence: ${((article as any).ocrConfidence ?? article.ocrConfidence ?? 0).toFixed(0)}% — text may contain minor recognition errors.`}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px] font-bold tracking-wider border border-amber-300 cursor-help"
+                                title="OCR text extraction confidence is under 60%. Some words or numbers may contain optical recognition noise."
+                                className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[9px] uppercase font-bold tracking-wider border border-amber-300 cursor-help"
                               >
-                                <ImageIcon className="w-2.5 h-2.5" />
-                                OCR {((article as any).ocrConfidence ?? article.ocrConfidence ?? 0).toFixed(0)}% CONF
+                                LOW OCR CONFIDENCE
                               </span>
                             )}
 
@@ -923,7 +931,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                           </span>
                           <span className="text-slate-300">·</span>
                           <span className="text-slate-400 text-[10px]">
-                            Published {publishedRelativeTime}
+                            {article.published_at ? `Published ${publishedRelativeTime}` : 'Publish date unknown'}
                           </span>
 
                           <span className="text-slate-300">•</span>
