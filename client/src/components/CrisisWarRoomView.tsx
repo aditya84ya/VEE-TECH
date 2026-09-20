@@ -970,14 +970,27 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
 
                       {/* Headline with interactive [Read more] / [Show less] toggle */}
                       {(() => {
-                        const titleText = (article.title || '').trim();
+                        const rawTitle = (article.title || '').trim();
+                        // If article.title was truncated at ingestion with '…' or '...' and full text is in content/raw_content, use the full text
+                        const fullTitle = (
+                          rawTitle.endsWith('…') || rawTitle.endsWith('...') || rawTitle.endsWith(' ...')
+                            ? (article.content && article.content.length > rawTitle.length
+                                ? article.content
+                                : article.raw_content && article.raw_content.length > rawTitle.length
+                                ? article.raw_content
+                                : article.description && article.description.length > rawTitle.length
+                                ? article.description
+                                : rawTitle)
+                            : rawTitle
+                        ).trim();
+
                         const isExpanded = Boolean(expandedHeadlines[article.id]);
                         const charLimit = 80;
-                        const isLong = titleText.length > charLimit;
-                        const displayTitle = isLong && !isExpanded ? `${titleText.substring(0, charLimit)}...` : titleText;
+                        const isLong = fullTitle.length > charLimit;
+                        const displayTitle = isLong && !isExpanded ? `${fullTitle.substring(0, charLimit)}...` : fullTitle;
 
                         return (
-                          <h3 className="font-bold text-[17px] text-black leading-snug">
+                          <h3 className="font-bold text-[17px] text-black leading-snug break-words">
                             <span>{displayTitle}</span>
 
                             {isLong && (

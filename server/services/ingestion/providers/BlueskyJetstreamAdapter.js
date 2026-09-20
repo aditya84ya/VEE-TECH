@@ -128,7 +128,7 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
           const rkey = event.commit?.rkey ?? Date.now();
           const uri = `at://${did}/app.bsky.feed.post/${rkey}`;
           const postUrl = formatBlueskySourceUrl(uri, did, rkey);
-          const title = text.length > 90 ? text.slice(0, 90) + '…' : text;
+          const title = text;
 
           let imageUrl = null;
           if (record.embed && record.embed.$type === 'app.bsky.embed.images' && Array.isArray(record.embed.images) && record.embed.images.length > 0) {
