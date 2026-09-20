@@ -24,6 +24,7 @@ import { IngestionGateway } from './services/ingestion/IngestionGateway.js';
 import { SearchService } from './services/SearchService.js';
 import { fetchVerificationContext } from './services/verification/GoogleCustomSearchAdapter.js';
 import { startCSEBackgroundWorker } from './services/csePoller.js';
+import { evaluateThreatSeverity, matchCriticalKeyword, CRITICAL_KEYWORDS } from './services/threatScorer.js';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -247,10 +248,10 @@ export async function warmupOllama() {
 }
 
 /**
- * Hardcode a programmatic safeguard following triage:
- * Only primary client "Infosys" can ever receive Critical risk or voice escalation.
- * Competitors (TCS, Wipro, Accenture) are strategic market intelligence and are
- * capped at High (max 7.5), with voice escalation always set to false.
+ * Programmatic safeguard following triage:
+ * Critical events with high-impact corporate/financial distress keywords
+ * register scores of 9.8 / 10.0 and display CRITICAL severity.
+ * Non-critical competitor news is classified as strategic market intelligence (High 7.5 max).
  */
 export function normalizeTriage(triage) {
   if (!triage) return triage;
@@ -258,19 +259,30 @@ export function normalizeTriage(triage) {
   // Force entity boundary
   const rawEntity = String(triage.entity || 'Infosys').trim();
   const isClient = rawEntity.toLowerCase() === 'infosys';
+  const summaryText = Array.isArray(triage.five_bullet_summary)
+    ? triage.five_bullet_summary.join(' ')
+    : '';
+  const textToCheck = `${triage.title || ''} ${triage.raw_content || ''} ${summaryText}`;
+  const matchedCritical = matchCriticalKeyword(textToCheck);
+  const isCritical = Boolean(matchedCritical) || triage.risk_level === 'Critical' || (Number(triage.risk_score) >= 9.0);
 
-  if (!isClient) {
-    // Hard clamp: Competitors can NEVER be CRITICAL
-    if (triage.risk_level === 'Critical') {
-      triage.risk_level = 'High'; // Downgrade to High
-    }
+  if (isCritical) {
+    triage.risk_level = 'Critical';
+    triage.risk_score = 9.8;
+    triage.severity = 'CRITICAL';
+    triage.score = 9.8;
+    triage.requires_voice_escalation = isClient;
+  } else if (!isClient) {
+    // Non-critical competitor news: capped at High (max 7.5)
     if (triage.risk_score > 7.5) {
-      triage.risk_score = 7.5; // Cap score to 7.5 max
+      triage.risk_score = 7.5;
     }
-    // Competitors NEVER wake up leadership with an emergency voice call
+    triage.severity = triage.risk_score >= 7.0 ? 'HIGH' : triage.risk_score >= 4.0 ? 'MEDIUM' : 'LOW';
+    triage.score = triage.risk_score;
     triage.requires_voice_escalation = false;
   } else {
-    // For primary client (Infosys): voice escalation ONLY if Critical
+    triage.severity = triage.risk_level === 'Critical' ? 'CRITICAL' : triage.risk_level === 'High' ? 'HIGH' : triage.risk_level === 'Low' ? 'LOW' : 'MEDIUM';
+    triage.score = triage.risk_score;
     triage.requires_voice_escalation = triage.risk_level === 'Critical';
   }
 
@@ -503,45 +515,19 @@ function deterministicFallbackTriage(content, title) {
 
   const isClient = entity === 'Infosys';
 
-  // Routine announcements: product launches, semiconductor/chips, expansions, quarterly commentary
-  const isRoutine = /chip design|semiconductor|product launch|partnership|sponsorship|expansion|indore|hiring|patent|facility|centre|results|quarterly|automotive/.test(text);
+  // Threat severity evaluation using critical keyword dictionary and transparent scoring tiers
+  const threat = evaluateThreatSeverity(title, content, entity);
+  const isCritical = threat.risk_level === 'Critical';
+  const isHigh = threat.risk_level === 'High';
 
-  // Severe crises
-  const hasExistentialCrisis = /rbi|regulator|sebi|audit notice|fraud|subpoena|probe|penalty|sec probe|enforcement action/.test(text);
-  const hasOperationalDisruption = /outage|blackout|lawsuit|downgrade|contract loss|ransomware|security breach/.test(text);
+  let riskLevel = threat.risk_level;
+  let riskScore = threat.score;
 
-  let riskLevel = 'Low';
-  let riskScore = 2.5;
-
-  if (isClient) {
-    if (hasExistentialCrisis) {
-      riskLevel = 'Critical';
-      riskScore = 9.5;
-    } else if (hasOperationalDisruption) {
-      riskLevel = 'High';
-      riskScore = 7.5;
-    } else if (isRoutine) {
-      riskLevel = 'Low';
-      riskScore = 2.5;
-    } else {
-      riskLevel = 'Medium';
-      riskScore = 4.8;
-    }
-  } else {
-    // Competitors: NEVER Critical. High is capped at 7.0 for sales counter-play
-    if (hasExistentialCrisis || hasOperationalDisruption) {
-      riskLevel = 'High';
-      riskScore = 7.0;
-    } else if (isRoutine) {
-      riskLevel = 'Low';
-      riskScore = 2.4;
-    } else {
-      riskLevel = 'Medium';
-      riskScore = 4.5;
-    }
+  if (!isClient && !isCritical && riskScore > 7.5) {
+    riskScore = 7.5;
   }
 
-  const sentiment = (isClient && (riskLevel === 'Critical' || riskLevel === 'High'))
+  const sentiment = (riskLevel === 'Critical' || (isClient && riskLevel === 'High'))
     ? 'Negative'
     : (!isClient && riskLevel === 'High')
     ? 'Positive'
@@ -550,22 +536,24 @@ function deterministicFallbackTriage(content, title) {
   return normalizeTriage({
     entity,
     sentiment,
-    theme: hasExistentialCrisis
-      ? 'Regulatory & Compliance'
-      : hasOperationalDisruption
-      ? 'Operational Disruption'
-      : isRoutine
+    severity: threat.severity,
+    score: riskScore,
+    theme: isCritical
+      ? 'Regulatory & Legal Crisis'
+      : isHigh
+      ? 'Operational & Market Disruption'
+      : threat.risk_level === 'Low'
       ? 'Strategic Product Innovation'
       : 'Enterprise Intelligence',
     risk_score: riskScore,
     risk_level: riskLevel,
-    requires_voice_escalation: isClient && riskLevel === 'Critical',
+    requires_voice_escalation: isClient && isCritical,
     five_bullet_summary: [
-      `What happened: A verified media update was reported concerning ${entity}.`,
-      `Why it matters: ${isClient ? `Directly impacts Infosys's operational reputation and stakeholder perception.` : `Competitor market update offering strategic intelligence for Infosys.`}`,
-      `Risk score rationale: Rated ${riskScore}/10 based on ${isClient ? (hasExistentialCrisis ? 'regulatory audit scrutiny directly targeting Infosys' : 'client operational impact') : 'competitor market development (non-existential to Infosys)'}.`,
-      `Competitor impact: ${isClient ? 'Competitors may seek to exploit this development in competitive cloud deals.' : 'Creates immediate RFP displacement and competitive positioning opportunities for Infosys.'}`,
-      `Recommended action: ${isClient ? (riskLevel === 'Critical' ? 'Immediate escalation to executive leadership and crisis response council.' : 'Monitor client sentiment and issue proactive clarification.') : 'Brief enterprise sales teams on competitor movement to capture market share.'}`
+      `What happened: ${isCritical ? 'CRITICAL ALERT: ' : ''}Verified media update reported concerning ${entity}.`,
+      `Threat rating: ${threat.severity} (${riskScore}/10.0)${threat.matchedKeyword ? ` - Triggered by: "${threat.matchedKeyword}"` : ''}.`,
+      `Why it matters: ${isClient ? `Directly impacts Infosys operational reputation, compliance standing, and stakeholder perception.` : `Competitor market update offering strategic positioning intelligence for Infosys.`}`,
+      `Risk score rationale: Rated ${riskScore}/10 based on ${threat.matchedKeyword ? `explicit distress trigger "${threat.matchedKeyword}"` : (isCritical ? 'high-impact regulatory/legal exposure' : isHigh ? 'operational impact' : 'routine market development')}.`,
+      `Recommended action: ${isClient ? (isCritical ? 'Immediate escalation to executive leadership and crisis response council.' : 'Monitor client sentiment and issue proactive clarification.') : 'Brief enterprise leadership on competitor movement.'}`
     ]
   });
 }
@@ -1152,28 +1140,35 @@ app.get(['/api/fetch-cse', '/api/fetch-cse-stream'], async (req, res) => {
         headers: { 'User-Agent': 'VeeAlert/1.0 (Google CSE Stream)' }
       });
       if (gRes.data?.items && Array.isArray(gRes.data.items)) {
-        items = gRes.data.items.map((item, idx) => ({
-          id: `cse-${Date.now()}-${idx}`,
-          api_source: 'Google Search Engine (CSE)',
-          source_name: item.displayLink || 'Google Programmable Search (CSE)',
-          title: item.title,
-          url: item.link,
-          image_url: item.pagemap?.cse_image?.[0]?.src || item.pagemap?.metatags?.[0]?.['og:image'] || null,
-          raw_content: item.snippet || item.title,
-          entity_mentioned: detectEntity(item.title, item.snippet || ''),
-          sentiment: 'Neutral',
-          risk_score: 7.2,
-          risk_level: 'High',
-          five_bullet_summary: [
-            `Verified Google Custom Search intelligence item (cx: ${cxId})`,
-            item.snippet || item.title,
-            `Direct web source indexed by Google CSE`
-          ],
-          published_at: item.pagemap?.metatags?.[0]?.['article:published_time'] || new Date().toISOString(),
-          ingested_at: new Date().toISOString(),
-          detection_latency_ms: 3200,
-          status: 'ACTIVE'
-        }));
+        items = gRes.data.items.map((item, idx) => {
+          const entity = detectEntity(item.title, item.snippet || '');
+          const threat = evaluateThreatSeverity(item.title, item.snippet || '', entity);
+          return {
+            id: `cse-${Date.now()}-${idx}`,
+            api_source: 'Google Search Engine (CSE)',
+            source_name: item.displayLink || 'Google Programmable Search (CSE)',
+            title: item.title,
+            url: item.link,
+            image_url: item.pagemap?.cse_image?.[0]?.src || item.pagemap?.metatags?.[0]?.['og:image'] || null,
+            raw_content: item.snippet || item.title,
+            entity_mentioned: entity,
+            sentiment: threat.risk_level === 'Critical' ? 'Negative' : (threat.risk_level === 'High' ? 'Negative' : 'Neutral'),
+            risk_score: threat.score,
+            risk_level: threat.risk_level,
+            severity: threat.severity,
+            score: threat.score,
+            five_bullet_summary: [
+              `Verified Google Custom Search intelligence item (cx: ${cxId})`,
+              `Severity: ${threat.severity} (${threat.score}/10.0)${threat.matchedKeyword ? ` - Distress vector: "${threat.matchedKeyword}"` : ''}`,
+              item.snippet || item.title,
+              `Direct web source indexed by Google CSE`
+            ],
+            published_at: item.pagemap?.metatags?.[0]?.['article:published_time'] || new Date().toISOString(),
+            ingested_at: new Date().toISOString(),
+            detection_latency_ms: 3200,
+            status: 'ACTIVE'
+          };
+        });
       }
     } catch (err) {
       console.warn('[Google CSE Stream] JSON API notice:', err.response?.data?.error?.message || err.message);
@@ -1196,6 +1191,8 @@ app.get(['/api/fetch-cse', '/api/fetch-cse-stream'], async (req, res) => {
         const pubDate = $(el).find('pubDate').text().trim();
         const desc = cleanHtml($(el).find('description').text());
         const source = $(el).find('source').text().trim() || 'Google Search Wire';
+        const entity = detectEntity(title, desc);
+        const threat = evaluateThreatSeverity(title, desc, entity);
 
         items.push({
           id: `cse-live-${Date.now()}-${idx}`,
@@ -1205,12 +1202,15 @@ app.get(['/api/fetch-cse', '/api/fetch-cse-stream'], async (req, res) => {
           url: link,
           image_url: null,
           raw_content: desc || title,
-          entity_mentioned: detectEntity(title, desc),
-          sentiment: 'Neutral',
-          risk_score: 6.8,
-          risk_level: 'High',
+          entity_mentioned: entity,
+          sentiment: threat.risk_level === 'Critical' ? 'Negative' : (threat.risk_level === 'High' ? 'Negative' : 'Neutral'),
+          risk_score: threat.score,
+          risk_level: threat.risk_level,
+          severity: threat.severity,
+          score: threat.score,
           five_bullet_summary: [
             `Real-time Google search event captured via query: ${query}`,
+            `Severity: ${threat.severity} (${threat.score}/10.0)${threat.matchedKeyword ? ` - Distress vector: "${threat.matchedKeyword}"` : ''}`,
             desc || title,
             `Mainstream publisher corroborated via Google Search Engine`
           ],

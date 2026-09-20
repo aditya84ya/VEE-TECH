@@ -176,7 +176,7 @@ export const CompetitorRadarView: React.FC<CompetitorRadarViewProps> = ({
     [articles]
   );
   const activeThreatsCount = useMemo(
-    () => articles.filter((a) => a.risk_level === 'Critical' || a.risk_level === 'High').length,
+    () => articles.filter((a) => a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || a.risk_level === 'High' || (a as any).severity === 'HIGH' || Number(a.risk_score || (a as any).score) >= 7.0).length,
     [articles]
   );
 
@@ -211,8 +211,15 @@ export const CompetitorRadarView: React.FC<CompetitorRadarViewProps> = ({
     }
 
     // Type filter
-    if (typeFilter !== 'All' && a.risk_level !== typeFilter) {
-      return false;
+    if (typeFilter !== 'All') {
+      const currentLevel = (a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || Number(a.risk_score || (a as any).score) >= 9.0)
+        ? 'Critical'
+        : (a.risk_level === 'High' || (a as any).severity === 'HIGH' || Number(a.risk_score || (a as any).score) >= 7.0)
+        ? 'High'
+        : (a.risk_level || 'Medium');
+      if (currentLevel !== typeFilter) {
+        return false;
+      }
     }
 
     return true;
@@ -430,9 +437,9 @@ export const CompetitorRadarView: React.FC<CompetitorRadarViewProps> = ({
 
   // Render an individual Article Card
   const renderArticleCard = (article: Article) => {
-    const isCritical = article.risk_level === 'Critical';
-    const isHigh = article.risk_level === 'High';
-    const isMedium = article.risk_level === 'Medium';
+    const isCritical = article.risk_level === 'Critical' || (article as any).severity === 'CRITICAL' || (Number(article.risk_score || (article as any).score) >= 9.0);
+    const isHigh = !isCritical && (article.risk_level === 'High' || (article as any).severity === 'HIGH' || (Number(article.risk_score || (article as any).score) >= 7.0));
+    const isMedium = !isCritical && !isHigh && (article.risk_level === 'Medium' || (article as any).severity === 'MEDIUM' || (Number(article.risk_score || (article as any).score) >= 4.0));
     const isAcknowledged = article.status === 'ACKNOWLEDGED';
     const isExpanded = Boolean(expandedBriefs[article.id]);
 
@@ -452,12 +459,14 @@ export const CompetitorRadarView: React.FC<CompetitorRadarViewProps> = ({
       ? article.risk_score > 10
         ? (article.risk_score / 10).toFixed(1)
         : article.risk_score.toFixed(1)
+      : (article as any).score
+      ? Number((article as any).score).toFixed(1)
       : isCritical
-      ? '8.5'
+      ? '9.8'
       : isHigh
-      ? '7.0'
+      ? '7.5'
       : isMedium
-      ? '4.5'
+      ? '5.0'
       : '2.5';
 
     let severityBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
@@ -498,7 +507,7 @@ export const CompetitorRadarView: React.FC<CompetitorRadarViewProps> = ({
               <span
                 className={`px-2 py-0.5 rounded-md text-[11px] font-mono shrink-0 border ${severityBadgeClass}`}
               >
-                {article.risk_level.toUpperCase()} {scoreValue}/10
+                {(isCritical ? 'CRITICAL' : isHigh ? 'HIGH' : (article.risk_level?.toUpperCase() || 'MEDIUM'))} {scoreValue}/10
               </span>
             </div>
 

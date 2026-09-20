@@ -119,6 +119,24 @@ export class TriageEngine {
     return 'news_web';
   }
 
+  private static readonly CRITICAL_KEYWORDS = [
+    'sebi emergency',
+    'emergency order',
+    'trading suspended',
+    'trading terminated',
+    'arrest',
+    'arrests',
+    'fraud',
+    'enforcement directorate',
+    'money laundering',
+    'insolvency',
+    'bankruptcy',
+    'liquidation',
+    'asset seizure',
+    'assets seized',
+    'whistleblower'
+  ];
+
   private static evaluateRiskAndSentiment(
     headline: string,
     desc: string,
@@ -127,22 +145,32 @@ export class TriageEngine {
   ): { sentiment: SentimentType; sentimentScore: number; riskScore: number; riskLevel: RiskLevel } {
     const text = (headline + ' ' + desc).toLowerCase();
 
-    // Critical Crisis Keywords
-    if (text.includes('rbi') || text.includes('audit') || text.includes('fraud') || text.includes('probe') || text.includes('breach') || text.includes('sec inquiry') || text.includes('regulator')) {
+    // 1. Dedicated CRITICAL Tier (Extreme Corporate / Financial Distress)
+    const hasCriticalMatch = this.CRITICAL_KEYWORDS.some(kw => text.includes(kw));
+    if (hasCriticalMatch) {
+      return { 
+        sentiment: 'critical_crisis', 
+        sentimentScore: -0.95, 
+        riskScore: 9.8, 
+        riskLevel: 'Critical' 
+      };
+    }
+
+    // Critical Crisis Keywords (Regulatory & Probes)
+    if (text.includes('rbi') || text.includes('audit') || text.includes('probe') || text.includes('breach') || text.includes('sec inquiry') || text.includes('regulator')) {
       if (isClient) {
-        return { sentiment: 'critical_crisis', sentimentScore: -0.92, riskScore: 9.6, riskLevel: 'Critical' };
+        return { sentiment: 'critical_crisis', sentimentScore: -0.92, riskScore: 9.8, riskLevel: 'Critical' };
       } else {
-        // Competitor crisis is an opportunity for Infosys!
-        return { sentiment: 'negative', sentimentScore: -0.75, riskScore: 6.9, riskLevel: 'High' };
+        return { sentiment: 'negative', sentimentScore: -0.75, riskScore: 7.5, riskLevel: 'High' };
       }
     }
 
     // High Impact Outages / Disputes
     if (text.includes('outage') || text.includes('down') || text.includes('lawsuit') || text.includes('fired') || text.includes('loss') || text.includes('delay')) {
       if (isClient) {
-        return { sentiment: 'negative', sentimentScore: -0.80, riskScore: 7.8, riskLevel: 'High' };
+        return { sentiment: 'negative', sentimentScore: -0.80, riskScore: 7.5, riskLevel: 'High' };
       } else {
-        return { sentiment: 'negative', sentimentScore: -0.65, riskScore: 6.2, riskLevel: 'High' };
+        return { sentiment: 'negative', sentimentScore: -0.65, riskScore: 7.5, riskLevel: 'High' };
       }
     }
 

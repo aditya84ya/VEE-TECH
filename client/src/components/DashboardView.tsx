@@ -106,7 +106,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // 1. DYNAMIC KPI CARDS (100% Derived from Real articles array)
   // =========================================================================
   const activeEvents = articles.length;
-  const criticalEvents = articles.filter((a) => a.risk_level === 'Critical').length;
+  const criticalEvents = articles.filter((a) => a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0)).length;
   const competitorEvents = articles.filter((a) => {
     const entity = (a.entity_mentioned || (a as any).entity || '').trim().toLowerCase();
     return entity !== 'infosys' && entity !== '';
@@ -130,10 +130,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // 2. DYNAMIC EVENT DISTRIBUTION (Donut Chart & Legend)
   // =========================================================================
   const criticalCount = criticalEvents;
-  const highCount = articles.filter((a) => a.risk_level === 'High').length;
-  const mediumCount = articles.filter((a) => a.risk_level === 'Medium').length;
-  const lowCount = articles.filter((a) => a.risk_level === 'Low').length;
+  const highCount = articles.filter((a) => !((a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0))) && (a.risk_level === 'High' || (a as any).severity === 'HIGH' || (Number(a.risk_score || (a as any).score) >= 7.0))).length;
+  const mediumCount = articles.filter((a) => !((a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0))) && !((a.risk_level === 'High' || (a as any).severity === 'HIGH' || (Number(a.risk_score || (a as any).score) >= 7.0))) && (a.risk_level === 'Medium' || (a as any).severity === 'MEDIUM' || (Number(a.risk_score || (a as any).score) >= 4.0))).length;
   const totalCenterValue = articles.length;
+  const lowCount = Math.max(0, totalCenterValue - criticalCount - highCount - mediumCount);
 
   const critPercent = totalCenterValue > 0 ? ((criticalCount / totalCenterValue) * 100).toFixed(1) : '0.0';
   const highPercent = totalCenterValue > 0 ? ((highCount / totalCenterValue) * 100).toFixed(1) : '0.0';
@@ -485,18 +485,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   relativeTime = 'Recent';
                 }
 
-                const level = article.risk_level || 'Medium';
+                const isCritical = article.risk_level === 'Critical' || (article as any).severity === 'CRITICAL' || (Number(article.risk_score || (article as any).score) >= 9.0);
+                const isHigh = !isCritical && (article.risk_level === 'High' || (article as any).severity === 'HIGH' || (Number(article.risk_score || (article as any).score) >= 7.0));
+                const level = isCritical ? 'Critical' : isHigh ? 'High' : (article.risk_level || 'Medium');
                 const scoreValue = article.risk_score
                   ? article.risk_score > 10
                     ? (article.risk_score / 10).toFixed(1)
                     : article.risk_score.toFixed(1)
-                  : level === 'Critical'
-                  ? '9.5'
-                  : level === 'High'
+                  : (article as any).score
+                  ? Number((article as any).score).toFixed(1)
+                  : isCritical
+                  ? '9.8'
+                  : isHigh
                   ? '7.5'
                   : level === 'Medium'
-                  ? '5.8'
-                  : '2.4';
+                  ? '5.0'
+                  : '2.5';
 
                 let riskBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
                 if (level === 'Critical') {

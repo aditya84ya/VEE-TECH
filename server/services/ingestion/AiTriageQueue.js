@@ -2,6 +2,7 @@ import axios from 'axios';
 import EventEmitter from 'node:events';
 import { logTraceEvent, STAGES } from './TraceLogger.js';
 import { processAutonomousMedia } from '../AutonomousMediaService.js';
+import { evaluateThreatSeverity, matchCriticalKeyword } from '../threatScorer.js';
 
 /**
  * Asynchronous Priority AI Triage Worker Queue
@@ -281,12 +282,30 @@ export class AiTriageQueue extends EventEmitter {
     if (!triage) return this._deterministicFallback();
     const rawEntity = String(triage.entity || 'Infosys').trim();
     const isClient = rawEntity.toLowerCase() === 'infosys';
+    const summaryText = Array.isArray(triage.five_bullet_summary)
+      ? triage.five_bullet_summary.join(' ')
+      : '';
+    const textToCheck = `${triage.title || ''} ${triage.raw_content || ''} ${summaryText}`;
+    const matchedCritical = matchCriticalKeyword(textToCheck);
+    const isCritical = Boolean(matchedCritical) || triage.risk_level === 'Critical' || (Number(triage.risk_score) >= 9.0);
 
-    if (!isClient) {
-      if (triage.risk_level === 'Critical') triage.risk_level = 'High';
-      if (triage.risk_score > 7.5) triage.risk_score = 7.5;
+    if (isCritical) {
+      triage.risk_level = 'Critical';
+      triage.risk_score = 9.8;
+      triage.severity = 'CRITICAL';
+      triage.score = 9.8;
+      triage.requires_voice_escalation = isClient;
+    } else if (!isClient) {
+      // Non-critical competitor news: capped at High (max 7.5)
+      if (triage.risk_score > 7.5) {
+        triage.risk_score = 7.5;
+      }
+      triage.severity = triage.risk_score >= 7.0 ? 'HIGH' : triage.risk_score >= 4.0 ? 'MEDIUM' : 'LOW';
+      triage.score = triage.risk_score;
       triage.requires_voice_escalation = false;
     } else {
+      triage.severity = triage.risk_level === 'Critical' ? 'CRITICAL' : triage.risk_level === 'High' ? 'HIGH' : triage.risk_level === 'Low' ? 'LOW' : 'MEDIUM';
+      triage.score = triage.risk_score;
       triage.requires_voice_escalation = triage.risk_level === 'Critical';
     }
     return triage;
@@ -299,19 +318,23 @@ export class AiTriageQueue extends EventEmitter {
     else if (text.includes('tcs') || text.includes('tata consultancy')) entity = 'TCS';
     else if (text.includes('wipro')) entity = 'Wipro';
 
+    const threat = evaluateThreatSeverity(title, content, entity);
+
     return {
       entity,
-      sentiment: 'Neutral',
-      theme: 'Market Intelligence',
-      risk_score: 5.0,
-      risk_level: 'Medium',
-      requires_voice_escalation: false,
+      sentiment: threat.risk_level === 'Critical' ? 'Negative' : 'Neutral',
+      theme: threat.risk_level === 'Critical' ? 'Regulatory & Legal Crisis' : 'Market Intelligence',
+      risk_score: threat.score,
+      risk_level: threat.risk_level,
+      severity: threat.severity,
+      score: threat.score,
+      requires_voice_escalation: threat.risk_level === 'Critical' && entity === 'Infosys',
       five_bullet_summary: [
-        `What happened: Telemetry captured report regarding ${entity}.`,
+        `What happened: ${threat.risk_level === 'Critical' ? 'CRITICAL DISTRESS EVENT: ' : ''}Telemetry captured report regarding ${entity}.`,
+        `Threat assessment: ${threat.severity} (${threat.score}/10.0)${threat.matchedKeyword ? ` - Triggered by: "${threat.matchedKeyword}"` : ''}`,
         'Why it matters: Event recorded into central intelligence memory for tactical tracking.',
-        'Risk score rationale: Standard baseline monitoring applied.',
-        'Competitor impact: Market positioning under standard watch.',
-        'Recommended action: Maintain regular intelligence surveillance.'
+        'Competitor impact: Market positioning under immediate watch.',
+        'Recommended action: Maintain regular intelligence surveillance and escalate if necessary.'
       ]
     };
   }

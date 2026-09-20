@@ -22,7 +22,8 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
   const [isVerifyOpen, setIsVerifyOpen] = useState(false);
   if (!article) return null;
 
-  const isCritical = article.risk_level === 'Critical';
+  const isCritical = article.risk_level === 'Critical' || (article as any).severity === 'CRITICAL' || (Number(article.risk_score || (article as any).score) >= 9.0);
+  const isHigh = !isCritical && (article.risk_level === 'High' || (article as any).severity === 'HIGH' || (Number(article.risk_score || (article as any).score) >= 7.0));
   const isAcknowledged = article.status === 'ACKNOWLEDGED';
 
   let relativeTime = 'Just now';
@@ -38,11 +39,13 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
     ? article.risk_score > 10
       ? (article.risk_score / 10).toFixed(1)
       : article.risk_score.toFixed(1)
+    : (article as any).score
+    ? Number((article as any).score).toFixed(1)
     : isCritical
-    ? '9.5'
-    : article.risk_level === 'High'
+    ? '9.8'
+    : isHigh
     ? '7.5'
-    : '5.8';
+    : '5.0';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
@@ -61,12 +64,12 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
             className={`px-2.5 py-0.5 rounded text-xs font-bold font-mono tracking-wide ${
               isCritical
                 ? 'bg-rose-50 text-rose-600 border border-rose-200'
-                : article.risk_level === 'High'
+                : isHigh
                 ? 'bg-amber-50 text-amber-700 border border-amber-200'
                 : 'bg-slate-100 text-slate-700 border border-slate-200'
             }`}
           >
-            {article.risk_level?.toUpperCase() || 'MEDIUM'} {scoreValue}/10
+            {(isCritical ? 'CRITICAL' : isHigh ? 'HIGH' : (article.risk_level?.toUpperCase() || 'MEDIUM'))} {scoreValue}/10
           </span>
 
           <span className="px-2.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-800 text-xs font-bold font-mono">

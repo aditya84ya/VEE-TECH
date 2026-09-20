@@ -18,6 +18,7 @@ import { GDELTAdapter } from './providers/GDELTAdapter.js';
 import { GoogleSearchFeedAdapter } from './providers/GoogleSearchFeedAdapter.js';
 import { validateEntityContext } from '../mediaMetrics.js';
 import { logTraceEvent, STAGES } from './TraceLogger.js';
+import { evaluateThreatSeverity } from '../threatScorer.js';
 
 const TARGET_ENTITY_REGEX = /\b(Infosys|TCS|Tata Consultancy Services|Wipro|Accenture|Finacle)\b/i;
 
@@ -353,8 +354,10 @@ export class IngestionGateway {
     const nowIso = new Date().toISOString();
     const isTimestampAnomaly = new Date(receivedAt).getTime() < new Date(publishedAt).getTime();
 
-    // Initial Raw Article Payload (status = 'ACTIVE' with triaged_at = null)
-    // Both triaged_at and dispatched_at are nullable in Supabase
+    // Initial Raw Article Payload (evaluated through threat severity scorer)
+    const threat = evaluateThreatSeverity(title, content, entity);
+    const isThreatCritical = threat.risk_level === 'Critical';
+
     const articlePayload = {
       id: candidateId,
       api_source: apiSource,
@@ -364,18 +367,21 @@ export class IngestionGateway {
       image_url: normalized.image || null,
       raw_content: content,
       entity_mentioned: entity,
-      sentiment: 'Neutral',
-      risk_score: 5.0,
-      risk_level: 'Medium',
+      sentiment: isThreatCritical ? 'Negative' : (threat.risk_level === 'High' ? 'Negative' : 'Neutral'),
+      risk_score: threat.score,
+      risk_level: threat.risk_level,
+      severity: threat.severity,
+      score: threat.score,
       five_bullet_summary: [
         `Fast-path raw commit from ${pubName}`,
+        `Threat assessment: ${threat.severity} (${threat.score}/10.0)${threat.matchedKeyword ? ` - Triggered by: "${threat.matchedKeyword}"` : ''}`,
         `Published: ${publishedAt}`,
-        `Awaiting AI triage in background queue...`
+        `Awaiting deep AI triage in background queue...`
       ],
       status: 'ACTIVE',
       published_at: publishedAt,
       ingested_at: nowIso,
-      theme: isTimestampAnomaly ? 'TIMESTAMP_ANOMALY' : 'Enterprise Intelligence',
+      theme: isThreatCritical ? 'Regulatory & Crisis Intelligence' : (isTimestampAnomaly ? 'TIMESTAMP_ANOMALY' : 'Enterprise Intelligence'),
       triaged_at: null,    // populated by AiTriageQueue once triage completes
       dispatched_at: null  // populated only if an alert is dispatched
     };

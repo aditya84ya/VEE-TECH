@@ -311,7 +311,10 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
     return sourceStream
       .filter((article) => {
         // Primary pill
-        if (primaryFilter === 'critical' && article.risk_level !== 'Critical') return false;
+        if (primaryFilter === 'critical') {
+          const isCrit = article.risk_level === 'Critical' || (article as any).severity === 'CRITICAL' || (Number(article.risk_score || (article as any).score) >= 9.0);
+          if (!isCrit) return false;
+        }
         if (primaryFilter === 'infosys' && !article.entity_mentioned?.toLowerCase().includes('infosys')) return false;
 
         // Secondary search
@@ -326,7 +329,14 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         }
 
         // Secondary severity
-        if (severityFilter !== 'ALL' && article.risk_level !== severityFilter) return false;
+        if (severityFilter !== 'ALL') {
+          const currentLevel = (article.risk_level === 'Critical' || (article as any).severity === 'CRITICAL' || Number(article.risk_score || (article as any).score) >= 9.0)
+            ? 'Critical'
+            : (article.risk_level === 'High' || (article as any).severity === 'HIGH' || Number(article.risk_score || (article as any).score) >= 7.0)
+            ? 'High'
+            : (article.risk_level || 'Medium');
+          if (currentLevel !== severityFilter) return false;
+        }
 
         // Secondary target
         if (targetFilter !== 'ALL' && article.entity_mentioned !== targetFilter) return false;
@@ -403,8 +413,8 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
 
   // Sidebar Analytics: Live Overview metrics
   const totalEvents = articles.length;
-  const criticalCount = articles.filter((a) => a.risk_level === 'Critical').length;
-  const highCount = articles.filter((a) => a.risk_level === 'High').length;
+  const criticalCount = articles.filter((a) => a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0)).length;
+  const highCount = articles.filter((a) => !((a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0))) && (a.risk_level === 'High' || (a as any).severity === 'HIGH' || (Number(a.risk_score || (a as any).score) >= 7.0))).length;
   const othersCount = Math.max(0, totalEvents - criticalCount - highCount);
 
   // Detection Performance aggregate metrics across real timestamps in operational live window
@@ -679,9 +689,9 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
             </div>
           ) : (
             filteredArticles.map((article, idx) => {
-              const isCritical = article.risk_level === 'Critical';
-              const isHigh = article.risk_level === 'High';
-              const isMedium = article.risk_level === 'Medium';
+              const isCritical = article.risk_level === 'Critical' || (article as any).severity === 'CRITICAL' || (Number(article.risk_score || (article as any).score) >= 9.0);
+              const isHigh = !isCritical && (article.risk_level === 'High' || (article as any).severity === 'HIGH' || (Number(article.risk_score || (article as any).score) >= 7.0));
+              const isMedium = !isCritical && !isHigh && (article.risk_level === 'Medium' || (article as any).severity === 'MEDIUM' || (Number(article.risk_score || (article as any).score) >= 4.0));
               const isAcknowledged = article.status === 'ACKNOWLEDGED';
               const isExpanded = Boolean(expandedBriefs[article.id]);
 
@@ -711,11 +721,13 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                 ? article.risk_score > 10
                   ? (article.risk_score / 10).toFixed(1)
                   : article.risk_score.toFixed(1)
+                : (article as any).score
+                ? Number((article as any).score).toFixed(1)
                 : isCritical
-                ? '9.5'
+                ? '9.8'
                 : isHigh
                 ? '7.5'
-                : '5.8';
+                : '5.0';
 
               // Severity styles
               let severityBadgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
@@ -857,7 +869,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                           <span
                             className={`px-2.5 py-0.5 rounded text-xs font-mono tracking-wide border ${severityBadgeClass}`}
                           >
-                            {article.risk_level?.toUpperCase() || 'MEDIUM'} {scoreValue}/10
+                            {(isCritical ? 'CRITICAL' : isHigh ? 'HIGH' : (article.risk_level?.toUpperCase() || 'MEDIUM'))} {scoreValue}/10
                           </span>
 
                           {isAcknowledged && (

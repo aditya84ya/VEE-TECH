@@ -1,6 +1,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import * as cheerio from 'cheerio';
+import { evaluateThreatSeverity } from './threatScorer.js';
 
 // Configuration
 const CSE_API_KEY = (process.env.GOOGLE_CUSTOM_SEARCH_KEY || '').trim();
@@ -136,14 +137,12 @@ export async function pollGoogleCSE(options = {}) {
 
         const slaTargetMet = latencySeconds <= 120; // Sub-2-minute SLA guarantee
 
-        const lowerTitle = title.toLowerCase();
-        const isCrisis = lowerTitle.includes('crisis') || lowerTitle.includes('breach') || lowerTitle.includes('scam') || lowerTitle.includes('fraud');
-        const isRegulatory = lowerTitle.includes('sebi') || lowerTitle.includes('regulatory') || lowerTitle.includes('fine') || lowerTitle.includes('penalty') || lowerTitle.includes('notice');
-        const isNegative = isCrisis || isRegulatory || lowerTitle.includes('drop') || lowerTitle.includes('fall') || lowerTitle.includes('loss');
-
-        const riskScore = isCrisis ? 8.8 : isRegulatory ? 7.6 : 6.8;
-        const riskLevel = riskScore >= 8.5 ? 'Critical' : riskScore >= 6.5 ? 'High' : 'Medium';
-        const sentiment = isNegative ? 'Negative' : 'Neutral';
+        const threat = evaluateThreatSeverity(title, snippet || title, entity);
+        const riskScore = threat.risk_score;
+        const riskLevel = threat.risk_level;
+        const severity = threat.severity;
+        const score = threat.score;
+        const sentiment = threat.sentiment || (threat.isCritical || threat.isHigh ? 'Negative' : 'Neutral');
 
         const structuredEvent = {
           id: articleHash,
@@ -168,6 +167,8 @@ export async function pollGoogleCSE(options = {}) {
           sentiment,
           risk_score: riskScore,
           risk_level: riskLevel,
+          severity,
+          score,
           status: 'ACTIVE',
           five_bullet_summary: [
             `Verified Google Programmable Search intelligence item (cx: ${CSE_CX_ID})`,

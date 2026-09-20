@@ -39,7 +39,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     simulateCrisis
   } = useWarRoom();
 
-  const criticalCount = articles.filter((a) => a.risk_level === 'Critical').length;
+  const criticalCount = articles.filter((a) => a.risk_level === 'Critical' || (a as any).severity === 'CRITICAL' || (Number(a.risk_score || (a as any).score) >= 9.0)).length;
 
   const handleEscalateVoice = (article: Article) => {
     setActiveVoiceCallArticle(article);
