@@ -299,55 +299,41 @@ def _find_tg_ringer_binary(vee_tech_root: Path) -> Optional[str]:
 
 
 def trigger_tg_call(seconds: Optional[int] = None) -> Dict[str, Any]:
-    """
-    Trigger Telegram audio ring via `tg-ringer call {target} --seconds {seconds}`.
-    Runs as a completely detached background process on Windows so it continues
-    ringing for the full duration after Python exits.
-    Logs output directly to tg_ringer.log.
-    """
     if seconds is None:
         try:
             seconds = int(get_env_var(["RING_SECONDS"], "30"))
         except Exception:
             seconds = 30
 
-    # Guarantee at least 30s ring duration to prevent missed-call cutoffs
     if seconds < 30:
         seconds = 30
 
     current_dir = Path(__file__).resolve().parent
-    vee_tech_root = (
-        current_dir
-        if (current_dir / "package.json").exists() or (current_dir / "node_modules").exists()
-        else current_dir.parent
-    )
-
+    vee_tech_root = current_dir if (current_dir / "node_modules").exists() else current_dir.parent
     target = get_env_var(["TG_RINGER_TARGET", "RING_TARGET"])
     bin_path = _find_tg_ringer_binary(vee_tech_root)
 
     if not bin_path:
-        warn = "tg-ringer binary not found in PATH or node_modules"
-        print(f"[!] TG-Ringer skipped: {warn}")
-        return {"channel": "call", "status": "SKIPPED", "error": warn}
-
-    cmd = [bin_path, "call"]
-    if target:
-        cmd.append(target)
-    cmd.extend(["--seconds", str(seconds)])
+        return {"channel": "call", "status": "SKIPPED", "error": "Missing binary"}
 
     log_path = vee_tech_root / "tg_ringer.log"
+    cmd_str = f'"{bin_path}" call {target} --seconds {seconds}' if target else f'"{bin_path}" call --seconds {seconds}'
 
     try:
         log_file = open(log_path, "a", encoding="utf-8")
         kwargs = {}
-        # Completely detach the process on Windows so it continues ringing after Python exits
         if os.name == "nt":
-            kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            # 0x00000008 = DETACHED_PROCESS, 0x00000200 = CREATE_NEW_PROCESS_GROUP
+            kwargs["creationflags"] = 0x00000008 | 0x00000200
 
+        # Disconnecting stdin (DEVNULL) is critical so Windows doesn't tie it to Python's lifecycle
         subprocess.Popen(
-            cmd,
+            cmd_str,
             stdout=log_file,
             stderr=log_file,
+            stdin=subprocess.DEVNULL,
+            cwd=str(vee_tech_root),
+            shell=True,
             **kwargs
         )
         print("call : done")
