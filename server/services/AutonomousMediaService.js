@@ -1,5 +1,5 @@
 import axios from 'axios';
-import pdf from 'pdf-parse';
+import * as pdfParseModule from 'pdf-parse';
 import { createWorker } from 'tesseract.js';
 
 let ocrWorker = null;
@@ -14,6 +14,28 @@ async function getOcrWorker() {
     }
   }
   return ocrWorker;
+}
+
+async function extractPdfText(buffer) {
+  try {
+    if (pdfParseModule.PDFParse) {
+      const parser = new pdfParseModule.PDFParse({ data: buffer });
+      const parsed = await parser.getText();
+      const text = (parsed?.text || '').trim();
+      try {
+        await parser.destroy();
+      } catch (_) {}
+      return text;
+    }
+    const pdfFn = pdfParseModule.default || pdfParseModule;
+    if (typeof pdfFn === 'function') {
+      const parsed = await pdfFn(buffer, { max: 3 });
+      return (parsed.text || '').trim();
+    }
+    return '';
+  } catch (err) {
+    throw err;
+  }
 }
 
 /**
@@ -49,8 +71,7 @@ export async function processAutonomousMedia(articlePayload) {
     if (isPdf) {
       // PDF text extraction via pdf-parse
       try {
-        const parsed = await pdf(buffer, { max: 3 }); // Top 3 pages
-        extractedText = (parsed.text || '').trim();
+        extractedText = await extractPdfText(buffer);
       } catch (pdfErr) {
         console.warn(`[AutonomousMedia] ⚠️ PDF parse notice for "${articlePayload.title?.slice(0, 40)}":`, pdfErr.message);
       }
