@@ -300,9 +300,10 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
             if (!apiSrc.includes('bluesky')) return false;
           } else if (sourceFilter === 'GDELT DOC') {
             if (!apiSrc.includes('gdelt')) return false;
-          } else if (sourceFilter === 'Google News RSS') {
-            if (!apiSrc.includes('google') && !apiSrc.includes('rss')) return false;
-            if (apiSrc.includes('publisher') || apiSrc.includes('et') || apiSrc.includes('institutional')) return false;
+          } else if (sourceFilter === 'Google News RSS' || sourceFilter === 'Google CSE') {
+            const matchesGoogle = apiSrc.includes('google') || apiSrc.includes('cse');
+            const isInstitutional = apiSrc.includes('institutional') || apiSrc.includes('mint') || apiSrc.includes('et rss');
+            if (!matchesGoogle || isInstitutional) return false;
           } else if (sourceFilter === 'Institutional') {
             if (!apiSrc.includes('institutional') && !apiSrc.includes('et') && !apiSrc.includes('publisher')) return false;
           }
@@ -536,6 +537,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
         >
           <option value="All">Source: All</option>
           <option value="Google News RSS">Google News RSS (Verified Wire)</option>
+          <option value="Google CSE">Google Search Engine (CSE Wire)</option>
           <option value="Institutional">Institutional Publisher Wires (ET, Mint, BS)</option>
           <option value="NewsAPI">NewsAPI (Global Aggregator)</option>
           <option value="Currents API">Currents Global News</option>

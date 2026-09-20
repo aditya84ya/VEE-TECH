@@ -38,14 +38,14 @@ export class GoogleRssAdapter extends ProviderAdapter {
   buildUrls() {
     const cb = Date.now();
     const qNational = encodeURIComponent(
-      '(Infosys OR "Infosys ADR" OR "NYSE: INFY" OR TCS OR "Tata Consultancy Services" OR Wipro OR "Wipro ADR" OR Accenture OR Finacle) when:1h'
+      '(Infosys OR "Infosys ADR" OR "NYSE: INFY" OR TCS OR "Tata Consultancy Services" OR Wipro OR "Wipro ADR" OR Accenture OR Finacle)'
     );
     const qRegional = encodeURIComponent(
-      '(Infosys OR TCS OR Wipro OR Accenture) (Kerala OR Kochi OR Trivandrum OR Thiruvananthapuram OR Bengaluru OR Bangalore) when:1h'
+      '(Infosys OR TCS OR Wipro OR Accenture) (Kerala OR Kochi OR Trivandrum OR Bengaluru OR Mumbai OR Delhi)'
     );
     return [
-      { name: 'Google News National (1h)', url: `https://news.google.com/rss/search?q=${qNational}&hl=en-IN&gl=IN&ceid=IN:en&_cb=${cb}` },
-      { name: 'Google News Regional Kerala/BLR (1h)', url: `https://news.google.com/rss/search?q=${qRegional}&hl=en-IN&gl=IN&ceid=IN:en&_cb=${cb + 1}` }
+      { name: 'Google News National Wire', url: `https://news.google.com/rss/search?q=${qNational}&hl=en-IN&gl=IN&ceid=IN:en&_cb=${cb}` },
+      { name: 'Google News Regional Hubs', url: `https://news.google.com/rss/search?q=${qRegional}&hl=en-IN&gl=IN&ceid=IN:en&_cb=${cb + 1}` }
     ];
   }
 
