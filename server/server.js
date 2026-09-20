@@ -1033,6 +1033,11 @@ export async function checkUrlReachability(targetUrl) {
     return { reachable: false, status: 400, reason: 'Invalid URL' };
   }
 
+  // Bluesky post URLs are active web destinations (bsky.app blocks HEAD requests with 404)
+  if (targetUrl.includes('bsky.app/profile/') || targetUrl.includes('bsky.app')) {
+    return { reachable: true, status: 200, timestamp: Date.now() };
+  }
+
   const cached = linkValidationCache.get(targetUrl);
   const now = Date.now();
   if (cached && (now - cached.timestamp < 24 * 3600 * 1000)) {

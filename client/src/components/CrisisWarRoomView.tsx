@@ -874,27 +874,40 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                       {/* Bottom Row Action Buttons */}
                       <div className="flex items-center justify-between pt-2 border-t border-slate-100 flex-wrap gap-2">
                         {/* View Source functional link */}
-                        {article.url && !unreachableUrls.has(article.url) ? (
-                          <a
-                            href={article.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 hover:underline"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            <span>View Source</span>
-                          </a>
-                        ) : article.url && unreachableUrls.has(article.url) ? (
-                          <span
-                            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-100/90 px-2 py-1 rounded cursor-not-allowed select-none"
-                            title="Source unavailable (publisher link returned 404 or dead link)"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5 opacity-40" />
-                            <span>Source unavailable</span>
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400">Verified Wire Source</span>
-                        )}
+                        {(() => {
+                          let effectiveUrl = article.url || (article as any).sourceUrl || '';
+                          if (effectiveUrl.startsWith('at://')) {
+                            const parts = effectiveUrl.replace('at://', '').split('/');
+                            effectiveUrl = `https://bsky.app/profile/${parts[0]}/post/${parts[2] || ''}`;
+                          }
+                          const isBluesky = effectiveUrl.includes('bsky.app');
+                          const isReachable = effectiveUrl && (!unreachableUrls.has(effectiveUrl) || isBluesky);
+
+                          if (isReachable) {
+                            return (
+                              <a
+                                href={effectiveUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:underline transition-colors cursor-pointer"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>View Source</span>
+                              </a>
+                            );
+                          } else if (effectiveUrl && unreachableUrls.has(effectiveUrl)) {
+                            return (
+                              <span
+                                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-100/90 px-2 py-1 rounded cursor-not-allowed select-none"
+                                title="Source unavailable (publisher link returned 404 or dead link)"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5 opacity-40" />
+                                <span>Source unavailable</span>
+                              </span>
+                            );
+                          }
+                          return <span className="text-xs text-slate-400">Verified Wire Source</span>;
+                        })()}
 
                         {/* Action Buttons */}
                         <div className="flex items-center gap-2">

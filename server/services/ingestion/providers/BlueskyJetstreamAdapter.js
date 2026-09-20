@@ -4,6 +4,21 @@ import { ProviderAdapter } from '../ProviderAdapter.js';
 const TARGET_REGEX = /\b(Infosys|Infosys\s+ADR|NYSE:\s*INFY|TCS|Tata\s+Consultancy|Wipro|Wipro\s+ADR|Accenture|Finacle)\b/i;
 const JETSTREAM_URL = 'wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post';
 
+export function formatBlueskySourceUrl(uri, did, rkey) {
+  if (did && rkey) {
+    return `https://bsky.app/profile/${did}/post/${rkey}`;
+  }
+  if (!uri || !uri.startsWith('at://')) return 'https://bsky.app';
+  const parts = uri.replace('at://', '').split('/');
+  const d = parts[0];
+  const collection = parts[1];
+  const rk = parts[2];
+  if (collection === 'app.bsky.feed.post' && d && rk) {
+    return `https://bsky.app/profile/${d}/post/${rk}`;
+  }
+  return 'https://bsky.app';
+}
+
 export class BlueskyJetstreamAdapter extends ProviderAdapter {
   constructor(options = {}) {
     super({
@@ -71,7 +86,7 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
           const did = event.did ?? 'unknown';
           const rkey = event.commit?.rkey ?? Date.now();
           const uri = `at://${did}/app.bsky.feed.post/${rkey}`;
-          const postUrl = `https://bsky.app/profile/${did}/post/${rkey}`;
+          const postUrl = formatBlueskySourceUrl(uri, did, rkey);
           const title = text.length > 90 ? text.slice(0, 90) + '…' : text;
 
           let imageUrl = null;
@@ -84,10 +99,12 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
 
           const rawItem = {
             uri,
+            did,
+            rkey,
             postUrl,
+            sourceUrl: postUrl,
             title,
             text,
-            did,
             imageUrl,
             createdAt: record.createdAt || new Date().toISOString()
           };
