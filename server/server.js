@@ -23,6 +23,7 @@ import {
 import { IngestionGateway } from './services/ingestion/IngestionGateway.js';
 import { SearchService } from './services/SearchService.js';
 import { fetchVerificationContext } from './services/verification/GoogleCustomSearchAdapter.js';
+import { startCSEBackgroundWorker } from './services/csePoller.js';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1653,6 +1654,12 @@ if (!isTestRun) {
 
     // Start the low-latency parallel ingestion gateway
     await ingestionGateway.start();
+
+    // Start autonomous Google CSE background worker daemon (60s loop)
+    startCSEBackgroundWorker({
+      supabase,
+      memoryArticles
+    });
   });
 
   // Handle port-already-in-use gracefully instead of crashing with unhandled error event

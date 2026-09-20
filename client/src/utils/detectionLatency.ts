@@ -96,7 +96,7 @@ export function formatDurationCompact(totalSeconds: number): string {
  */
 export function isPushSource(apiSource?: string | null): boolean {
   const s = (apiSource || '').toLowerCase();
-  return s.includes('bluesky') || s.includes('jetstream') || s.includes('firehose');
+  return s.includes('bluesky') || s.includes('jetstream') || s.includes('firehose') || s.includes('cse');
 }
 
 /**
