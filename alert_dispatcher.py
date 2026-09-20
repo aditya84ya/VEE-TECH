@@ -317,23 +317,21 @@ def trigger_tg_call(seconds: Optional[int] = None) -> Dict[str, Any]:
         return {"channel": "call", "status": "SKIPPED", "error": "Missing binary"}
 
     log_path = vee_tech_root / "tg_ringer.log"
-    cmd_str = f'"{bin_path}" call {target} --seconds {seconds}' if target else f'"{bin_path}" call --seconds {seconds}'
+    cmd_str = f'"{bin_path}" call {target} --seconds {seconds} >> "{log_path}" 2>&1' if target else f'"{bin_path}" call --seconds {seconds} >> "{log_path}" 2>&1'
 
     try:
-        log_file = open(log_path, "a", encoding="utf-8")
         kwargs = {}
         if os.name == "nt":
             # 0x00000008 = DETACHED_PROCESS, 0x00000200 = CREATE_NEW_PROCESS_GROUP
             kwargs["creationflags"] = 0x00000008 | 0x00000200
 
-        # Disconnecting stdin (DEVNULL) is critical so Windows doesn't tie it to Python's lifecycle
         subprocess.Popen(
             cmd_str,
-            stdout=log_file,
-            stderr=log_file,
-            stdin=subprocess.DEVNULL,
             cwd=str(vee_tech_root),
             shell=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             **kwargs
         )
         print("call : done")
