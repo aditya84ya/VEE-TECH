@@ -15,6 +15,18 @@ const SITEMAPS = [
     publisherDomain: 'indianexpress.com'
   },
   {
+    name: 'The Hindu (Google News Sitemap)',
+    url: 'https://www.thehindu.com/news-sitemap.xml',
+    publisher: 'The Hindu',
+    publisherDomain: 'thehindu.com'
+  },
+  {
+    name: 'Deccan Herald (Google News Sitemap)',
+    url: 'https://www.deccanherald.com/news-sitemap.xml',
+    publisher: 'Deccan Herald',
+    publisherDomain: 'deccanherald.com'
+  },
+  {
     name: 'Telangana Today (Google News Sitemap)',
     url: 'https://telanganatoday.com/news-sitemap.xml',
     publisher: 'Telangana Today',

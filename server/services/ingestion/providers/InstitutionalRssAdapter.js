@@ -15,6 +15,8 @@ const FEEDS = [
   { name: 'PR Newswire (Corporate Press Releases)', url: 'https://www.prnewswire.com/rss/news-releases-list.rss' },
 
   // National Institutional Wires
+  { name: 'Moneycontrol Latest News', url: 'https://www.moneycontrol.com/rss/latestnews.xml' },
+  { name: 'Moneycontrol Business News', url: 'https://www.moneycontrol.com/rss/business.xml' },
   { name: 'The Hindu National', url: 'https://www.thehindu.com/news/national/feeder/default.rss' },
   { name: 'The Hindu Business', url: 'https://www.thehindu.com/business/feeder/default.rss' },
   { name: 'The Hindu Business Line', url: 'https://www.thehindubusinessline.com/news/feeder/default.rss' },
