@@ -1,3 +1,4 @@
+import https from 'node:https';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import WebSocket from 'ws';
@@ -134,7 +135,7 @@ export const sourceTelemetry = {
   googlenews: { id: 'googlenews', name: 'Google News RSS (Instant Wire)', lastPolled: null, lastStatus: 'Operational', lastCount: 0, lastNewArticle: null },
   institutional: { id: 'institutional', name: 'Institutional Publisher Wires (ET, Mint, BS)', lastPolled: null, lastStatus: 'Operational', lastCount: 0, lastNewArticle: null },
   bluesky: { id: 'bluesky', name: 'Bluesky Social Wire (AT Protocol Trial)', lastPolled: null, lastStatus: 'Operational', lastCount: 0, lastNewArticle: null },
-  gdelt: { id: 'gdelt', name: 'GDELT DOC 2.0 (Standby Archive)', lastPolled: null, lastStatus: 'Standby', lastCount: 0, lastNewArticle: null }
+  gdelt: { id: 'gdelt', name: 'GDELT DOC 2.0 (Global Discovery Wire)', lastPolled: null, lastStatus: 'Operational', lastCount: 0, lastNewArticle: null }
 };
 
 export function updateSourceTelemetry(sourceId, updates) {
@@ -159,11 +160,14 @@ let currentsCooldownUntil = 0;
 let guardianCooldownUntil = 0;
 const QUOTA_BACKOFF_MS = 30 * 60 * 1000; // 30 minutes
 
-// Independent slow-poll timestamps for quota-constrained sources.
-// These fire at most once every 15 minutes, independent of the main 20s cycle.
-const SLOW_POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
-let newsApiLastCalledAt = 0;
-let gNewsLastCalledAt = 0;
+// Tiered slow-poll timestamps for quota-gated free-tier sources (NewsAPI, GNews, NewsData).
+// These fire at most once every 15 minutes (900,000ms) to preserve daily allowances.
+const QUOTA_GATED_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes (900,000ms)
+const lastPolledTimes = {
+  newsapi: 0,
+  gnews: 0,
+  newsdata: 0
+};
 
 // ============================================================================
 // SINCE-CURSOR TRACKING (incremental fetch — only new articles per cycle)
@@ -241,15 +245,15 @@ export async function fetchNewsApi(keywords = DEFAULT_KEYWORDS) {
 
   sourceTelemetry.newsapi.lastPolled = new Date().toISOString();
 
-  // Independent slow-poll gate: NewsAPI free plan = 100 req/day.
-  // Fire at most once every 15 minutes to preserve quota across the full day.
+  // Tiered polling gate: NewsAPI free plan = 100 req/day.
+  // Immediate exit with [] if less than 15 minutes (900,000ms) have passed.
   const nowMs = Date.now();
-  if (nowMs - newsApiLastCalledAt < SLOW_POLL_INTERVAL_MS) {
-    const waitMin = Math.ceil((SLOW_POLL_INTERVAL_MS - (nowMs - newsApiLastCalledAt)) / 60000);
-    console.log(`[NewsAPI] ⏱️ Slow-poll gate: next call in ${waitMin}min (quota-preserving 15min interval).`);
+  if (nowMs - lastPolledTimes.newsapi < QUOTA_GATED_INTERVAL_MS) {
+    const waitMin = Math.ceil((QUOTA_GATED_INTERVAL_MS - (nowMs - lastPolledTimes.newsapi)) / 60000);
+    console.log(`[NewsAPI] ⏱️ Tiered polling gate: next call in ${waitMin}min (quota-preserving 15min interval).`);
     return [];
   }
-  newsApiLastCalledAt = nowMs;
+  lastPolledTimes.newsapi = nowMs;
 
   // Strict boolean query — exactly the 4 target entities, no noise
   const strictQuery = '(Infosys OR "Tata Consultancy Services" OR Wipro OR Accenture)';
@@ -313,6 +317,8 @@ export async function fetchNewsApi(keywords = DEFAULT_KEYWORDS) {
   }
 }
 
+export const fetchNewsAPI = fetchNewsApi;
+
 // GDELT Cooldown Tracker (3-minute backoff on 429 or timeout)
 let gdeltCooldownUntil = 0;
 
@@ -333,16 +339,21 @@ export async function fetchGdeltDoc(query = '(Infosys OR TCS OR Wipro OR Accentu
 
   const queryStr = encodeURIComponent(query);
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${queryStr}&mode=ArtList&format=json&sort=datedesc&timespan=24h&maxrecords=15`;
-  console.log(`[GDELT DOC] Querying global event database (timespan: 24h, timeout: 15s)...`);
+  console.log(`[GDELT DOC] Querying global event database (timespan: 24h, timeout: 25s)...`);
 
   try {
+    const agent = new https.Agent({
+      rejectUnauthorized: false // CRITICAL: Bypasses strict Node.js TLS cert mismatches for GDELT's CDN
+    });
+
     const response = await axios.get(url, {
+      httpsAgent: agent,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9'
       },
-      timeout: 15000 // 15 second timeout to allow GDELT response without premature abort
+      timeout: 25000 // 25 seconds for GDELT's slow server response times
     });
 
     // Check if GDELT returned rate-limit plain text instead of JSON
@@ -439,7 +450,7 @@ export function enrichWithGdeltContext(article) {
 // ============================================================================
 // 4. THE GUARDIAN CONTENT API (The Premium Wire)
 // ============================================================================
-export async function fetchGuardianNews(keywords = 'Infosys OR TCS OR Wipro OR Accenture') {
+export async function fetchGuardianNews(keywords = '"Infosys" OR "Tata Consultancy Services" OR "Wipro" OR "Accenture"') {
   if (Date.now() < guardianCooldownUntil) {
     const remainingSec = Math.ceil((guardianCooldownUntil - Date.now()) / 1000);
     console.log(`[ProviderAdapter:guardian] ⏭ Skipped fetch — ${remainingSec}s remaining in cooldown`);
@@ -459,7 +470,7 @@ export async function fetchGuardianNews(keywords = 'Infosys OR TCS OR Wipro OR A
   const guardianFrom = sinceTimestamps.guardian
     ? sinceTimestamps.guardian.slice(0, 10) // Guardian wants YYYY-MM-DD
     : undefined;
-  console.log(`[The Guardian] Querying premium content API (order=newest${guardianFrom ? `, from-date=${guardianFrom}` : ''})...`);
+  console.log(`[The Guardian] Querying premium content API (q=${keywords}, order=newest, page-size=15${guardianFrom ? `, from-date=${guardianFrom}` : ''})...`);
 
   try {
     const response = await axios.get('https://content.guardianapis.com/search', {
@@ -468,7 +479,7 @@ export async function fetchGuardianNews(keywords = 'Infosys OR TCS OR Wipro OR A
         'api-key': apiKey,
         'show-fields': 'headline,bodyText,trailText,thumbnail',
         'order-by': 'newest',
-        'page-size': 10,
+        'page-size': 15,
         ...(guardianFrom ? { 'from-date': guardianFrom } : {})
       },
       timeout: 12000,
@@ -489,7 +500,9 @@ export async function fetchGuardianNews(keywords = 'Infosys OR TCS OR Wipro OR A
             title: cleanHtml(item.fields?.headline || item.webTitle),
             url: item.webUrl,
             image_url: item.fields?.thumbnail || null,
-            raw_content: bodyClean.slice(0, 600),
+            description: cleanHtml(item.fields?.trailText || bodyClean.slice(0, 300)),
+            content: bodyClean.slice(0, 2000),
+            raw_content: bodyClean.slice(0, 3000),
             published_at: item.webPublicationDate ? new Date(item.webPublicationDate).toISOString() : new Date().toISOString()
           };
         });
@@ -518,6 +531,8 @@ export async function fetchGuardianNews(keywords = 'Infosys OR TCS OR Wipro OR A
     return [];
   }
 }
+
+export const fetchGuardian = fetchGuardianNews;
 
 // ============================================================================
 // 5. PUBLISHER RSS FEEDS (The Institutional & High-Freshness Wire)
@@ -694,14 +709,15 @@ export async function fetchGNews() {
     return [];
   }
 
-  // Independent slow-poll gate: GNews free plan = 100 req/day.
+  // Tiered polling gate: GNews free plan = 100 req/day.
+  // Immediate exit with [] if less than 15 minutes (900,000ms) have passed.
   const nowGNews = Date.now();
-  if (nowGNews - gNewsLastCalledAt < SLOW_POLL_INTERVAL_MS) {
-    const waitMin = Math.ceil((SLOW_POLL_INTERVAL_MS - (nowGNews - gNewsLastCalledAt)) / 60000);
-    console.log(`[GNews] ⏱️ Slow-poll gate: next call in ${waitMin}min (quota-preserving 15min interval).`);
+  if (nowGNews - lastPolledTimes.gnews < QUOTA_GATED_INTERVAL_MS) {
+    const waitMin = Math.ceil((QUOTA_GATED_INTERVAL_MS - (nowGNews - lastPolledTimes.gnews)) / 60000);
+    console.log(`[GNews] ⏱️ Tiered polling gate: next call in ${waitMin}min (quota-preserving 15min interval).`);
     return [];
   }
-  gNewsLastCalledAt = nowGNews;
+  lastPolledTimes.gnews = nowGNews;
 
   sourceTelemetry.gnews.lastPolled = new Date().toISOString();
   const strictQuery = '(Infosys OR "Tata Consultancy Services" OR Wipro OR Accenture)';
@@ -789,6 +805,16 @@ export async function fetchNewsData() {
     return [];
   }
 
+  // Tiered polling gate: NewsData free plan has strict rate quotas.
+  // Immediate exit with [] if less than 15 minutes (900,000ms) have passed.
+  const nowNewsData = Date.now();
+  if (nowNewsData - lastPolledTimes.newsdata < QUOTA_GATED_INTERVAL_MS) {
+    const waitMin = Math.ceil((QUOTA_GATED_INTERVAL_MS - (nowNewsData - lastPolledTimes.newsdata)) / 60000);
+    console.log(`[NewsData] ⏱️ Tiered polling gate: next call in ${waitMin}min (quota-preserving 15min interval).`);
+    return [];
+  }
+  lastPolledTimes.newsdata = nowNewsData;
+
   sourceTelemetry.newsdata.lastPolled = new Date().toISOString();
   const strictQuery = '(Infosys OR TCS OR Wipro OR Accenture)';
   // NewsData.io supports `timeframe` param (hours, e.g. '1' = last 1 hour).
@@ -871,15 +897,15 @@ export async function fetchCurrentsNews() {
   }
 
   sourceTelemetry.currents.lastPolled = new Date().toISOString();
-  const strictQuery = 'Infosys OR TCS OR Wipro OR Accenture';
+  const strictQuery = '("Infosys" OR "TCS" OR "Tata Consultancy Services" OR "Wipro" OR "Accenture")';
   // Currents supports `start_date` (ISO 8601). Use since-cursor as the floor.
   const currentsFrom = sinceTimestamps.currents || new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  console.log(`[Currents] Querying global news API (start_date=${currentsFrom.slice(0, 16)})...`);
+  console.log(`[Currents] Querying global news API (query=${strictQuery}, start_date=${currentsFrom.slice(0, 16)})...`);
 
   try {
     const response = await axios.get('https://api.currentsapi.services/v1/search', {
       params: {
-        keywords: strictQuery,
+        query: strictQuery,
         language: 'en',
         apiKey: apiKey,
         start_date: currentsFrom  // Only articles newer than last successful fetch
@@ -925,6 +951,8 @@ export async function fetchCurrentsNews() {
     return [];
   }
 }
+
+export const fetchCurrents = fetchCurrentsNews;
 
 // ============================================================================
 // 9. BLUESKY SOCIAL WIRE (Decentralized AT Protocol Intelligence)
@@ -980,24 +1008,26 @@ export async function fetchMultiSourceNews(processIngestCallback) {
 
   const cycleTime = new Date().toLocaleTimeString('en-IN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   console.log('\n================== [INGESTION CYCLE: ' + cycleTime + '] ==================');
-  console.log('⚡ [Multi-Source Engine] Commencing Concurrent 6-Source Ingestion:');
+  console.log('⚡ [Multi-Source Engine] Commencing Concurrent 7-Source Ingestion:');
   console.log('   1. NewsAPI        (15min slow-poll | since-cursor | 100 req/day quota)');
   console.log('   2. Currents API   (Every cycle | since-cursor start_date)');
   console.log('   3. GNews          (15min slow-poll | since-cursor from | 100 req/day quota)');
   console.log('   4. NewsData.io    (Every cycle | timeframe=1h window)');
   console.log('   5. The Guardian   (Every cycle | since-cursor from-date)');
   console.log('   6. Publisher RSS  (Every cycle | GUID pre-filter + entity filter)');
+  console.log('   7. GDELT DOC 2.0  (Every cycle | TLS-bypass Agent | 25s timeout)');
   console.log('   [Bluesky: Disabled — CDN-blocked IN region, Not Configured]');
   console.log('=========================================================================');
 
-  // Execute 6 active sources concurrently (Bluesky disabled — CDN-blocked)
+  // Execute 7 active sources concurrently (Bluesky disabled — CDN-blocked)
   const results = await Promise.allSettled([
     fetchNewsApi(),
     fetchCurrentsNews(),
     fetchGNews(),
     fetchNewsData(),
     fetchGuardianNews(),
-    fetchPublisherRss()
+    fetchPublisherRss(),
+    fetchGdeltDoc()
   ]);
 
   const rawAggregatedArticles = [];
@@ -1007,7 +1037,8 @@ export async function fetchMultiSourceNews(processIngestCallback) {
     GNews: 0,
     NewsData: 0,
     'The Guardian API': 0,
-    'Publisher RSS': 0
+    'Publisher RSS': 0,
+    'GDELT DOC 2.0': 0
   };
 
   const sourceNames = [
@@ -1016,7 +1047,8 @@ export async function fetchMultiSourceNews(processIngestCallback) {
     'GNews',
     'NewsData',
     'The Guardian API',
-    'Publisher RSS'
+    'Publisher RSS',
+    'GDELT DOC 2.0'
   ];
 
   results.forEach((result, idx) => {
@@ -1036,7 +1068,8 @@ export async function fetchMultiSourceNews(processIngestCallback) {
   console.log(
     `\n[Fetch Sources] NewsAPI: ${sourceCounts['NewsAPI']} | Currents: ${sourceCounts['Currents API']} | ` +
     `GNews: ${sourceCounts['GNews']} | NewsData: ${sourceCounts['NewsData']} | ` +
-    `Guardian: ${sourceCounts['The Guardian API']} | RSS: ${sourceCounts['Publisher RSS']}`
+    `Guardian: ${sourceCounts['The Guardian API']} | RSS: ${sourceCounts['Publisher RSS']} | ` +
+    `GDELT: ${sourceCounts['GDELT DOC 2.0']}`
   );
   console.log(`[MultiSource] RAW FETCH TOTAL: ${rawTotal} articles. Starting dedup & triage...`);
 
@@ -1058,7 +1091,7 @@ export async function fetchMultiSourceNews(processIngestCallback) {
     }
 
     // PHASE 0 PRE-FILTER: Drop irrelevant articles upfront before DB queries or triage
-    const textToCheck = `${article.title || ''} ${article.description || ''} ${article.content || ''}`;
+    const textToCheck = `${article.title || ''} ${article.description || ''} ${article.content || ''} ${article.raw_content || ''}`;
     if (!TARGET_ENTITY_REGEX.test(textToCheck)) {
       junk++;
       console.log(`[Guardrail Pre-Filter] 🛡️ DROPPED IRRELEVANT: "${(article.title || '').slice(0, 55)}..."`);

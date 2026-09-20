@@ -1,5 +1,11 @@
+import http from 'node:http';
+import https from 'node:https';
 import axios from 'axios';
 import { ProviderAdapter } from '../ProviderAdapter.js';
+import { logTraceEvent, STAGES, maskUrlCredentials } from '../TraceLogger.js';
+
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 8 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 8 });
 
 function cleanHtml(str) {
   if (!str) return '';
@@ -20,7 +26,6 @@ export class NewsApiAdapter extends ProviderAdapter {
       providerName: 'newsapi',
       displayName: 'NewsAPI (Global Aggregator)',
       fetchMode: 'POLL',
-      // NewsAPI free tier allows 100 requests / 24 hours. Poll every 15 minutes.
       intervalMs: options.intervalMs || 15 * 60 * 1000,
       priority: 2
     });
@@ -36,77 +41,115 @@ export class NewsApiAdapter extends ProviderAdapter {
     this.lastCursor = cursor;
   }
 
-  async fetch() {
-    if (Date.now() < this.cooldownUntil) {
-      const remainingSec = Math.ceil((this.cooldownUntil - Date.now()) / 1000);
-      console.log(`[ProviderAdapter:${this.providerName}] ⏭ Skipped fetch — ${remainingSec}s remaining in cooldown`);
-      return [];
-    }
+  async fetch(opts = {}) {
+    const traceId = opts.traceId || `tr_newsapi_${Date.now()}`;
 
     if (!this.apiKey) {
       this.metrics.status = 'DISABLED';
+      logTraceEvent({
+        stage: STAGES.PROVIDER_FETCH_SKIPPED_NOT_CONFIGURED,
+        traceId,
+        provider: 'newsapi',
+        reason: 'NEWSAPI_KEY missing'
+      });
       return [];
     }
 
     const query = '(Infosys OR "Tata Consultancy Services" OR Wipro OR Accenture)';
     const fromParam = this.lastCursor || new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const endpoint = 'https://newsapi.org/v2/everything';
+    const maskedUrl = `${endpoint}?q=${encodeURIComponent(query)}&from=${fromParam}&sortBy=publishedAt&apiKey=REDACTED`;
 
-    const res = await axios.get('https://newsapi.org/v2/everything', {
-      params: {
-        q: query,
-        sortBy: 'publishedAt',
-        language: 'en',
-        pageSize: 20,
-        from: fromParam
-      },
-      headers: {
-        'X-Api-Key': this.apiKey,
-        'User-Agent': 'VeeAlert/2.0 (Realtime News Architecture)'
-      },
-      timeout: this.timeoutMs
+    logTraceEvent({
+      stage: STAGES.HTTP_REQUEST_START,
+      traceId,
+      provider: 'newsapi',
+      extra: { url: maskedUrl }
     });
 
-    const articles = res.data?.articles || [];
+    const reqStart = Date.now();
+    try {
+      const res = await axios.get(endpoint, {
+        params: {
+          q: query,
+          sortBy: 'publishedAt',
+          language: 'en',
+          pageSize: 20,
+          from: fromParam
+        },
+        headers: {
+          'X-Api-Key': this.apiKey,
+          'User-Agent': 'VeeAlert/2.0 (Realtime News Architecture)'
+        },
+        httpAgent,
+        httpsAgent,
+        timeout: this.timeoutMs
+      });
+      const reqDuration = Date.now() - reqStart;
 
-    if (articles.length > 0) {
-      const newestDate = articles
-        .map(a => a.publishedAt)
-        .filter(Boolean)
-        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+      logTraceEvent({
+        stage: STAGES.HTTP_RESPONSE,
+        traceId,
+        provider: 'newsapi',
+        durationMs: reqDuration,
+        extra: {
+          status: res.status,
+          contentLength: res.headers['content-length'] || JSON.stringify(res.data || '').length
+        }
+      });
 
-      if (newestDate) {
-        this.saveCursor(newestDate);
+      const articles = res.data?.articles || [];
+
+      if (articles.length > 0) {
+        const newestDate = articles
+          .map(a => a.publishedAt)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
+        if (newestDate) {
+          this.saveCursor(newestDate);
+        }
       }
-    }
 
-    return articles;
+      return {
+        items: articles,
+        stats: { rawCount: articles.length, staleCount: 0, duplicateCount: 0 }
+      };
+    } catch (err) {
+      const reqDuration = Date.now() - reqStart;
+      logTraceEvent({
+        stage: STAGES.HTTP_ERROR,
+        traceId,
+        provider: 'newsapi',
+        durationMs: reqDuration,
+        status: err.response?.status || null,
+        reason: err.message
+      });
+      throw err;
+    }
   }
 
   normalize(raw) {
-    if (!raw || !raw.title || !raw.url || raw.title.includes('[Removed]')) return null;
+    if (!raw || !raw.title || !raw.url) return null;
 
     const publishedAt = raw.publishedAt ? new Date(raw.publishedAt).toISOString() : null;
     const now = new Date().toISOString();
-    let publisherDomain = null;
-    try {
-      publisherDomain = new URL(raw.url).hostname.replace(/^www\./, '');
-    } catch (_) {}
 
     return {
       providerArticleId: String(raw.url),
       provider: 'newsapi',
-      publisher: raw.source?.name || publisherDomain || 'NewsAPI Wire',
-      publisherDomain: publisherDomain || 'newsapi.org',
+      publisher: raw.source?.name || 'NewsAPI Aggregator',
+      publisherDomain: raw.source?.name ? `${raw.source.name.replace(/[^a-z0-9]/gi, '').toLowerCase()}.com` : 'newsapi.org',
       title: cleanHtml(raw.title),
       url: raw.url,
       canonicalUrl: raw.url,
-      description: cleanHtml(raw.description || ''),
-      content: cleanHtml(raw.content || raw.description || raw.title),
+      description: cleanHtml(raw.description) || null,
+      content: cleanHtml(raw.content) || cleanHtml(raw.description) || cleanHtml(raw.title),
       image: raw.urlToImage || null,
       language: 'en',
       country: null,
       publishedAt,
-      providerAvailableAt: publishedAt,
+      providerAvailableAt: null, // Syndication proxy
       receivedAt: now,
       ingestedAt: now
     };

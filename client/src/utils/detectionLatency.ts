@@ -18,11 +18,14 @@
 export interface DetectionLatencyResult {
   diffSeconds: number | null;
   formattedLatency: string;
+  metricLabel: string;
+  isSyndicationProxy: boolean;
   status: 'WITHIN_TARGET' | 'ABOVE_TARGET' | 'ANOMALY' | 'UNAVAILABLE';
   statusBadgeText: string;
   isAnomaly: boolean;
   clockSkewSeconds?: number;
   publishedUtc?: string;
+  providerAvailableUtc?: string;
   detectedUtc?: string;
   targetText: string;
   statusText: string;
@@ -107,17 +110,28 @@ export function isPushSource(apiSource?: string | null): boolean {
 export function calculateDetectionLatency(
   publishedRaw?: string | number | Date | null,
   detectedRaw?: string | number | Date | null,
-  apiSource?: string | null
+  apiSource?: string | null,
+  providerAvailableRaw?: string | number | Date | null
 ): DetectionLatencyResult {
   const isPush = apiSource ? isPushSource(apiSource) : true;
   const targetThresholdSec = isPush ? 120 : 3 * 3600;
   const targetLabel = isPush ? '≤ 2m' : '≤ 3h';
+
+  const hasProviderAvailable = Boolean(
+    providerAvailableRaw && !isNaN(new Date(providerAvailableRaw).getTime())
+  );
+  const isSyndicationProxy = !isPush && !hasProviderAvailable;
+  const metricLabel = isPush
+    ? 'Detection latency'
+    : (hasProviderAvailable ? 'Detection latency' : 'Publication-to-Ingest Lag (Syndication Proxy)');
 
   // Case 1 & 2: Missing or invalid timestamps
   if (!publishedRaw || !detectedRaw) {
     return {
       diffSeconds: null,
       formattedLatency: 'Unavailable',
+      metricLabel,
+      isSyndicationProxy,
       status: 'UNAVAILABLE',
       statusBadgeText: 'Unavailable',
       isAnomaly: false,
@@ -136,6 +150,8 @@ export function calculateDetectionLatency(
     return {
       diffSeconds: null,
       formattedLatency: 'Unavailable',
+      metricLabel,
+      isSyndicationProxy,
       status: 'UNAVAILABLE',
       statusBadgeText: 'Unavailable',
       isAnomaly: false,
@@ -146,42 +162,51 @@ export function calculateDetectionLatency(
 
   const publishedUtc = formatUtcTimestamp(pubDate);
   const detectedUtc = formatUtcTimestamp(detDate);
+  const providerAvailableUtc = hasProviderAvailable
+    ? formatUtcTimestamp(new Date(providerAvailableRaw!))
+    : undefined;
 
-  // Difference in seconds
-  const diffMs = detTime - pubTime;
+  // If providerAvailableAt exists for polled feeds, measure from provider availability;
+  // otherwise measure from publication time (and explicitly label as syndication proxy)
+  const baseTime = hasProviderAvailable ? new Date(providerAvailableRaw!).getTime() : pubTime;
+  const diffMs = detTime - baseTime;
   const diffSeconds = Math.round(diffMs / 1000);
 
-  // Case 4: detectedAt < publishedAt (Anomaly / clock skew)
+  // Case 4: detectedAt < baseTime (Anomaly / clock skew)
   if (diffSeconds < 0) {
     const clockSkewSec = Math.abs(diffSeconds);
     return {
       diffSeconds,
       formattedLatency: 'Timestamp anomaly',
+      metricLabel,
+      isSyndicationProxy,
       status: 'ANOMALY',
       statusBadgeText: clockSkewSec <= 15 ? `⚠ ${clockSkewSec}s clock skew` : '⚠ Timestamp anomaly',
       isAnomaly: true,
       clockSkewSeconds: clockSkewSec,
       publishedUtc,
+      providerAvailableUtc,
       detectedUtc,
       targetText: targetLabel,
       statusText: 'TIMESTAMP ANOMALY'
     };
   }
 
-  // Case 3: publishedAt == detectedAt (diffSeconds === 0)
-  // or positive latency
+  // Case 3: positive latency
   const formattedLatency = formatDurationCompact(diffSeconds);
   const isWithinTarget = diffSeconds <= targetThresholdSec;
-
   const targetSuffix = isPush ? '2m' : '3h';
 
   return {
     diffSeconds,
     formattedLatency,
+    metricLabel,
+    isSyndicationProxy,
     status: isWithinTarget ? 'WITHIN_TARGET' : 'ABOVE_TARGET',
     statusBadgeText: isWithinTarget ? `✓ WITHIN ${targetSuffix} TARGET` : `⚠ ABOVE ${targetSuffix} TARGET`,
     isAnomaly: false,
     publishedUtc,
+    providerAvailableUtc,
     detectedUtc,
     targetText: targetLabel,
     statusText: isWithinTarget ? 'WITHIN TARGET' : 'ABOVE TARGET'

@@ -1,5 +1,7 @@
 import axios from 'axios';
 import EventEmitter from 'node:events';
+import { logTraceEvent, STAGES } from './TraceLogger.js';
+import { processAutonomousMedia } from '../AutonomousMediaService.js';
 
 /**
  * Asynchronous Priority AI Triage Worker Queue
@@ -101,11 +103,35 @@ export class AiTriageQueue extends EventEmitter {
 
     try {
       console.log(`[AiTriageQueue] 🧠 [P${priority}] Processing AI triage for: "${article.title?.slice(0, 50)}..." (waited ${queueWaitMs}ms)`);
+      logTraceEvent({
+        stage: STAGES.AI_STARTED,
+        traceId: article.traceId,
+        articleId: article.id,
+        provider: article.api_source,
+        extra: { priority, waitMs: queueWaitMs }
+      });
+
+      // Autonomous media interception & extraction (PDF filings, sitemap images, crowd screenshots)
+      if (article.mediaUrl || article.pdfUrl || article.image_url || article.image) {
+        try {
+          await processAutonomousMedia(article);
+        } catch (_) {}
+      }
+
       const triage = await this._executeOllamaTriage(article.raw_content, article.title, article.source_name);
 
       const triagedAt = new Date().toISOString();
       const triageDurationMs = Date.now() - startTime;
       this._recordTriageLatency(triageDurationMs);
+
+      logTraceEvent({
+        stage: STAGES.AI_COMPLETED,
+        traceId: article.traceId,
+        articleId: article.id,
+        provider: article.api_source,
+        durationMs: triageDurationMs,
+        extra: { risk_level: triage.risk_level, risk_score: triage.risk_score }
+      });
 
       // Evaluate alert rules
       const alertEval = this.alertRulesEvaluator ? this.alertRulesEvaluator(triage) : { channels: [], requiresVoice: false };

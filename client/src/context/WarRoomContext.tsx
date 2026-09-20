@@ -1,44 +1,22 @@
 /// <reference types="vite/client" />
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+/**
+ * WarRoomContext.tsx — exports ONLY the WarRoomProvider component.
+ *
+ * Non-component exports (WarRoomContext object, Article, WarRoomContextValue)
+ * are re-exported here from warRoomContextInstance.ts so downstream imports
+ * require no changes, while Vite Fast Refresh sees this file as a
+ * pure-component module (no mixed component/non-component exports).
+ */
+import React, { useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import axios from 'axios';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-export interface Article {
-  id: string;
-  correlation_id?: string;
-  api_source?: string;
-  source_name: string;
-  title: string;
-  url: string | null;
-  image_url?: string | null;
-  raw_content: string;
-  entity_mentioned: string;
-  sentiment: 'Positive' | 'Neutral' | 'Negative';
-  risk_score: number;
-  risk_level: 'Low' | 'Medium' | 'High' | 'Critical';
-  five_bullet_summary: string[];
-  status: 'ACTIVE' | 'ACKNOWLEDGED';
-  published_at: string;
-  ingested_at: string;
-  triaged_at?: string;
-  briefed_at?: string;
-  alerted_at?: string;
-  dispatched_at?: string;
-}
-
-export interface WarRoomContextValue {
-  articles: Article[];
-  loading: boolean;
-  error: string | null;
-  isRealtimeActive: boolean;
-  isSimulating: boolean;
-  isFetchingLive: boolean;
-  fetchArticles: (isInitial?: boolean) => Promise<void>;
-  acknowledgeArticle: (id: string) => Promise<void>;
-  fetchLiveNews: () => Promise<void>;
-  simulateCrisis: () => Promise<void>;
-  triggerVoiceCallAlert: (article: Article) => Promise<void>;
-}
+// Re-export types & context object from the isolated instance file
+// so all existing consumers (useWarRoom.ts, App.tsx, etc.) keep working unchanged.
+export type { Article, WarRoomContextValue } from './warRoomContextInstance';
+export { WarRoomContext } from './warRoomContextInstance';
+import { WarRoomContext } from './warRoomContextInstance';
+import type { Article, WarRoomContextValue } from './warRoomContextInstance';
 
 const getApiBaseUrl = () => {
   const globalObj = typeof globalThis !== 'undefined' ? (globalThis as any) : null;
@@ -78,8 +56,6 @@ async function retryWithBackoff<T>(
   throw new Error('All retry attempts failed');
 }
 
-export const WarRoomContext = createContext<WarRoomContextValue | null>(null);
-
 export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -87,6 +63,8 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [isRealtimeActive, setIsRealtimeActive] = useState<boolean>(false);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [isFetchingLive, setIsFetchingLive] = useState<boolean>(false);
+
+  const newestCursorRef = useRef<string>('');
 
   // 1. Fetch initial load of articles with exponential backoff
   const fetchArticles = useCallback(async (isInitial = false) => {
@@ -113,6 +91,9 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         if (data && data.length > 0) {
           setArticles(data as Article[]);
+          if (data[0]?.ingested_at) {
+            newestCursorRef.current = data[0].ingested_at;
+          }
           if (isInitial) setLoading(false);
           return;
         }
@@ -122,6 +103,9 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
       const resp = await axios.get(`${API_BASE_URL}/api/articles`);
       if (resp.data && Array.isArray(resp.data.articles)) {
         setArticles(resp.data.articles);
+        if (resp.data.articles[0]?.ingested_at) {
+          newestCursorRef.current = resp.data.articles[0].ingested_at;
+        }
       }
     } catch (err: any) {
       console.warn('[WarRoomProvider] Fetch notice:', err.message);
@@ -151,13 +135,45 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     fetchArticles(true);
 
-    let backgroundSyncInterval: ReturnType<typeof setInterval> | null = null;
-    let channel: any = null;
+    // Function to perform cursor-based reconnect recovery without full-table reload
+    const performReconnectRecovery = async (cursor: string) => {
+      if (!cursor || !isSupabaseConfigured || !supabase) return;
+      try {
+        console.log('[WarRoom] Recovery started');
+        const { data: missingArticles, error: recErr } = await supabase
+          .from('articles')
+          .select('*')
+          .gt('ingested_at', cursor)
+          .order('ingested_at', { ascending: false });
 
-    // Continuous 15s background sync ensures new events always arrive even if Supabase Realtime blips
-    backgroundSyncInterval = setInterval(() => {
-      fetchArticles(false);
-    }, 15000);
+        if (recErr) {
+          console.warn('[WarRoom] Recovery query notice:', recErr.message);
+          return;
+        }
+
+        const count = missingArticles?.length || 0;
+        console.log(`[WarRoom] Recovery fetched ${count} articles`);
+
+        if (count > 0) {
+          setArticles((prev) => {
+            const existingIds = new Set(prev.map((a) => a.id));
+            const newUnique = (missingArticles as Article[]).filter((a) => !existingIds.has(a.id));
+            if (newUnique.length === 0) return prev;
+            // Update cursor with the newest item
+            if (newUnique[0]?.ingested_at && newUnique[0].ingested_at > newestCursorRef.current) {
+              newestCursorRef.current = newUnique[0].ingested_at;
+            }
+            return [...newUnique, ...prev];
+          });
+        }
+        console.log('[WarRoom] Recovery completed');
+      } catch (e: any) {
+        console.warn('[WarRoom] Recovery exception:', e.message);
+      }
+    };
+
+    let channel: any = null;
+    let hasConnectedOnce = false;
 
     if (isSupabaseConfigured && supabase) {
       try {
@@ -173,10 +189,17 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
             },
             (payload) => {
               const newArt = payload.new as Article;
-              if (import.meta.env?.DEV) {
-                console.log('🔥 [Supabase Realtime INSERT Received]:', newArt.title);
+              if (!newArt || !newArt.id) return;
+
+              console.log('[WarRoom] Realtime INSERT', newArt.id, newArt.title);
+
+              // Update newest cursor
+              if (newArt.ingested_at && newArt.ingested_at > newestCursorRef.current) {
+                newestCursorRef.current = newArt.ingested_at;
               }
+
               setArticles((currentArticles) => {
+                // Stable identity deduplication by article.id
                 if (currentArticles.some((article) => article.id === newArt.id)) {
                   return currentArticles;
                 }
@@ -193,21 +216,27 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
             },
             (payload) => {
               const updated = payload.new as Article;
-              if (import.meta.env?.DEV) {
-                console.log('🔄 [Supabase Realtime UPDATE Received]:', updated.id, updated.status);
-              }
+              if (!updated || !updated.id) return;
+
+              console.log('[WarRoom] Realtime UPDATE', updated.id, updated.status, updated.risk_level || '');
+
               setArticles((prev) =>
                 prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
               );
             }
           )
           .subscribe((status) => {
-            if (import.meta.env?.DEV) {
-              console.log(`[Supabase Realtime Status]: ${status}`);
-            }
             if (status === 'SUBSCRIBED') {
+              console.log('[WarRoom] Realtime SUBSCRIBED');
               setIsRealtimeActive(true);
+
+              // If this is a re-connection after a drop, execute cursor recovery
+              if (hasConnectedOnce && newestCursorRef.current) {
+                performReconnectRecovery(newestCursorRef.current);
+              }
+              hasConnectedOnce = true;
             } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+              console.warn('[WarRoom] Realtime DISCONNECTED', status);
               setIsRealtimeActive(false);
             }
           });
@@ -217,10 +246,6 @@ export const WarRoomProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
 
     return () => {
-      if (backgroundSyncInterval) {
-        clearInterval(backgroundSyncInterval);
-        backgroundSyncInterval = null;
-      }
       if (channel && supabase) {
         supabase.removeChannel(channel);
       }

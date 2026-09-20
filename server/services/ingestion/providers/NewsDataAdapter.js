@@ -1,12 +1,18 @@
+import http from 'node:http';
+import https from 'node:https';
 import axios from 'axios';
 import { ProviderAdapter } from '../ProviderAdapter.js';
+import { logTraceEvent, STAGES, maskUrlCredentials } from '../TraceLogger.js';
+
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 8 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 8 });
 
 export class NewsDataAdapter extends ProviderAdapter {
   constructor(options = {}) {
     super({
       providerName: 'newsdata',
       displayName: 'NewsData.io Real-Time Wire',
-      fetchMode: 'POLL', // Supports STREAM when registration succeeds
+      fetchMode: 'POLL',
       intervalMs: options.intervalMs || 60000,
       priority: 1
     });
@@ -23,41 +29,81 @@ export class NewsDataAdapter extends ProviderAdapter {
     this.lastCursor = cursor;
   }
 
-  async fetch() {
-    if (Date.now() < this.cooldownUntil) {
-      const remainingSec = Math.ceil((this.cooldownUntil - Date.now()) / 1000);
-      console.log(`[ProviderAdapter:${this.providerName}] ⏭ Skipped fetch — ${remainingSec}s remaining in cooldown`);
-      return [];
-    }
+  async fetch(opts = {}) {
+    const traceId = opts.traceId || `tr_newsdata_${Date.now()}`;
 
     if (!this.apiKey) {
       this.metrics.status = 'DISABLED';
+      logTraceEvent({
+        stage: STAGES.PROVIDER_FETCH_SKIPPED_NOT_CONFIGURED,
+        traceId,
+        provider: 'newsdata',
+        reason: 'NEWSDATA_API_KEY missing'
+      });
       return [];
     }
 
-    // REST latest endpoint
     const query = encodeURIComponent('(Infosys OR TCS OR Wipro OR Accenture)');
     const url = `https://newsdata.io/api/1/latest?apikey=${this.apiKey}&q=${query}&language=en`;
+    const maskedUrl = maskUrlCredentials(url);
 
-    const res = await axios.get(url, {
-      timeout: this.timeoutMs,
-      headers: { 'Accept': 'application/json' }
+    logTraceEvent({
+      stage: STAGES.HTTP_REQUEST_START,
+      traceId,
+      provider: 'newsdata',
+      extra: { url: maskedUrl }
     });
 
-    const results = res.data?.results || [];
+    const reqStart = Date.now();
+    try {
+      const res = await axios.get(url, {
+        timeout: this.timeoutMs,
+        httpAgent,
+        httpsAgent,
+        headers: { 'Accept': 'application/json' }
+      });
+      const reqDuration = Date.now() - reqStart;
 
-    if (results.length > 0) {
-      const newestDate = results
-        .map(r => r.pubDate)
-        .filter(Boolean)
-        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+      logTraceEvent({
+        stage: STAGES.HTTP_RESPONSE,
+        traceId,
+        provider: 'newsdata',
+        durationMs: reqDuration,
+        extra: {
+          status: res.status,
+          contentLength: res.headers['content-length'] || JSON.stringify(res.data || '').length
+        }
+      });
 
-      if (newestDate) {
-        this.saveCursor(newestDate);
+      const results = res.data?.results || [];
+
+      if (results.length > 0) {
+        const newestDate = results
+          .map(r => r.pubDate)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
+        if (newestDate) {
+          this.saveCursor(newestDate);
+        }
       }
-    }
 
-    return results;
+      return {
+        items: results,
+        stats: { rawCount: results.length, staleCount: 0, duplicateCount: 0 }
+      };
+    } catch (err) {
+      const reqDuration = Date.now() - reqStart;
+      logTraceEvent({
+        stage: STAGES.HTTP_ERROR,
+        traceId,
+        provider: 'newsdata',
+        durationMs: reqDuration,
+        status: err.response?.status || null,
+        reason: err.message
+      });
+      throw err;
+    }
   }
 
   normalize(raw) {
@@ -74,8 +120,8 @@ export class NewsDataAdapter extends ProviderAdapter {
     return {
       providerArticleId: String(raw.article_id || raw.link),
       provider: 'newsdata',
-      publisher: raw.source_id || raw.source_name || 'NewsData Wire',
-      publisherDomain: raw.source_url ? new URL(raw.source_url).hostname : null,
+      publisher: raw.source_id || 'NewsData.io',
+      publisherDomain: raw.source_id ? `${raw.source_id}.com` : 'newsdata.io',
       title: raw.title,
       url: raw.link,
       canonicalUrl: raw.link,
@@ -85,7 +131,7 @@ export class NewsDataAdapter extends ProviderAdapter {
       language: raw.language || 'en',
       country: Array.isArray(raw.country) ? raw.country[0] : raw.country,
       publishedAt,
-      providerAvailableAt: publishedAt,
+      providerAvailableAt: null, // Syndication proxy: upstream does not emit separate availability timestamp
       receivedAt: now,
       ingestedAt: now
     };

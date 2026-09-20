@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { useContext } from 'react';
-import { WarRoomContext, Article, WarRoomContextValue } from '../context/WarRoomContext';
+import { WarRoomContext } from '../context/warRoomContextInstance';
+import type { Article, WarRoomContextValue } from '../context/warRoomContextInstance';
 
 export type { Article, WarRoomContextValue };
 

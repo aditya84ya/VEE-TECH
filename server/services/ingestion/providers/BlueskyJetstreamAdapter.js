@@ -71,8 +71,15 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
           const did = event.did ?? 'unknown';
           const rkey = event.commit?.rkey ?? Date.now();
           const uri = `at://${did}/app.bsky.feed.post/${rkey}`;
-          const postUrl = `https://bsky.app/profile/${did}/post/${rkey}`;
           const title = text.length > 90 ? text.slice(0, 90) + '…' : text;
+
+          let imageUrl = null;
+          if (record.embed && record.embed.$type === 'app.bsky.embed.images' && Array.isArray(record.embed.images) && record.embed.images.length > 0) {
+            const imageRef = record.embed.images[0].image?.ref?.$link || record.embed.images[0].image?.ref?.toString();
+            if (imageRef) {
+              imageUrl = `https://cdn.bsky.app/img/feed_thumbnail/plain/${did}/${imageRef}@jpeg`;
+            }
+          }
 
           const rawItem = {
             uri,
@@ -80,6 +87,7 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
             title,
             text,
             did,
+            imageUrl,
             createdAt: record.createdAt || new Date().toISOString()
           };
 
@@ -129,7 +137,8 @@ export class BlueskyJetstreamAdapter extends ProviderAdapter {
       canonicalUrl: raw.postUrl,
       description: raw.text?.slice(0, 300) || raw.title,
       content: raw.text || raw.title,
-      image: null,
+      image: raw.imageUrl || null,
+      mediaUrl: raw.imageUrl || null,
       language: 'en',
       country: null,
       publishedAt,

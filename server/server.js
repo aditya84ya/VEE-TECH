@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { randomUUID, createHash } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -21,6 +22,7 @@ import {
 } from './services/newsFetcher.js';
 import { IngestionGateway } from './services/ingestion/IngestionGateway.js';
 import { SearchService } from './services/SearchService.js';
+import { fetchVerificationContext } from './services/verification/GoogleCustomSearchAdapter.js';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +43,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:7b';
 // Middlewares
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
+app.use(express.text({ type: ['application/xml', 'text/xml', 'application/atom+xml'], limit: '10mb' }));
 
 // Initialize Supabase Client
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -202,6 +205,22 @@ export const ingestionGateway = new IngestionGateway({
     // Keep in-memory cache synchronized for fast client reads
     memoryArticles.unshift(article);
     if (memoryArticles.length > 500) memoryArticles.pop();
+  },
+  onArticleUpdated: (updated) => {
+    // Synchronize AI-triaged fields into memoryArticles in-place without duplicating cards
+    const idx = memoryArticles.findIndex((a) => a.id === updated.id);
+    if (idx !== -1) {
+      memoryArticles[idx] = {
+        ...memoryArticles[idx],
+        ...updated,
+        risk_level: updated.risk_level || memoryArticles[idx].risk_level,
+        risk_score: updated.risk_score ?? memoryArticles[idx].risk_score,
+        five_bullet_summary: updated.five_bullet_summary || memoryArticles[idx].five_bullet_summary,
+        status: updated.status || memoryArticles[idx].status,
+        triaged_at: updated.triaged_at || memoryArticles[idx].triaged_at
+      };
+      console.log(`[Server] 🔄 Synchronized AI triage into memory cache for ID: ${updated.id} (${updated.risk_level} ${updated.risk_score}/10)`);
+    }
   }
 });
 
@@ -921,9 +940,168 @@ app.post('/api/ingest', async (req, res) => {
   }
 });
 
+// POST /api/ingest/raw - Microservice & Python FastWire direct ingress
+app.post('/api/ingest/raw', async (req, res) => {
+  try {
+    const raw = req.body || {};
+    const text = raw.raw_content || raw.content || raw.text || raw.title || '';
+    const payload = {
+      title: raw.title || text.slice(0, 100).trim(),
+      raw_content: text,
+      source_name: raw.source_name || 'Indian FastWire (Direct)',
+      api_source: raw.api_source || 'Telegram Direct',
+      url: raw.url || `https://fastwire.internal/${Date.now()}`,
+      published_at: raw.published_at || new Date().toISOString()
+    };
+    const result = await processIngest(payload);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('[FastWire Route Error]', error);
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// WEBSUB (PubSubHubbub) PUSH WEBHOOK ENGINE (W3C Standard Google Alerts)
+// ============================================================================
+// GET /api/webhooks/websub - Handshake verification
+app.get('/api/webhooks/websub', (req, res) => {
+  const challenge = req.query['hub.challenge'];
+  const topic = req.query['hub.topic'];
+  const mode = req.query['hub.mode'];
+
+  console.log(`[WebSub] ⚡ Handshake verification received: mode=${mode}, topic=${topic}`);
+  if (challenge) {
+    return res.status(200).send(String(challenge));
+  }
+  return res.status(400).send('Missing hub.challenge');
+});
+
+// POST /api/webhooks/websub - Instant push event delivery from Google Alerts Hub
+app.post('/api/webhooks/websub', async (req, res) => {
+  try {
+    const rawXml = typeof req.body === 'string' ? req.body : JSON.stringify(req.body || '');
+    if (!rawXml || rawXml.length < 10) {
+      return res.status(204).send();
+    }
+
+    const $ = cheerio.load(rawXml, { xmlMode: true });
+    const entries = $('entry, item').toArray();
+
+    console.log(`[WebSub] ⚡ Received push notification with ${entries.length} items from Google Alerts`);
+
+    for (const el of entries) {
+      const rawTitle = $(el).find('title').text().trim();
+      const cleanTitle = rawTitle.replace(/<[^>]*>?/gm, '').trim();
+      const link = $(el).find('link').attr('href') || $(el).find('link').text().trim();
+      const published = $(el).find('published, pubDate, updated').text().trim();
+      const rawSummary = $(el).find('content, summary, description').text().trim();
+      const cleanContent = rawSummary.replace(/<[^>]*>?/gm, '').trim();
+
+      if (!cleanTitle && !cleanContent) continue;
+
+      // Asynchronously process incoming push alert through triage pipeline
+      processIngest({
+        title: cleanTitle || cleanContent.slice(0, 100),
+        raw_content: cleanContent || cleanTitle,
+        source_name: 'Google Alerts (WebSub Instant Push)',
+        api_source: 'WebSub Push',
+        url: link || `https://news.google.com/alert/${Date.now()}`,
+        published_at: published ? new Date(published).toISOString() : new Date().toISOString()
+      }).catch(err => console.error('[WebSub Process Error]', err.message));
+    }
+
+    // Acknowledge receipt to Google PubSubHubbub Hub immediately (204 No Content)
+    return res.status(204).send();
+  } catch (err) {
+    console.error('[WebSub Webhook Error]', err);
+    return res.status(500).send(err.message);
+  }
+});
+
 // ============================================================================
 // 5. ADDITIONAL PRODUCTION API ENDPOINTS
 // ============================================================================
+
+// ============================================================================
+// REAL-TIME LINK REACHABILITY VALIDATOR & CACHE (24h In-Memory TTL)
+// ============================================================================
+const linkValidationCache = new Map(); // url -> { reachable: boolean, status: number, timestamp: number }
+
+export async function checkUrlReachability(targetUrl) {
+  if (!targetUrl || typeof targetUrl !== 'string') {
+    return { reachable: false, status: 400, reason: 'Invalid URL' };
+  }
+
+  const cached = linkValidationCache.get(targetUrl);
+  const now = Date.now();
+  if (cached && (now - cached.timestamp < 24 * 3600 * 1000)) {
+    return cached;
+  }
+
+  let reachable = false;
+  let status = 0;
+  try {
+    const res = await axios.head(targetUrl, {
+      timeout: 3500,
+      maxRedirects: 5,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      validateStatus: () => true
+    });
+    status = res.status;
+    if (res.status >= 200 && res.status < 400) {
+      reachable = true;
+    } else if (res.status === 405 || res.status === 403) {
+      // Some servers block HEAD requests — fallback to small GET with byte range
+      try {
+        const getRes = await axios.get(targetUrl, {
+          timeout: 3500,
+          maxRedirects: 5,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Range': 'bytes=0-200'
+          },
+          validateStatus: () => true
+        });
+        status = getRes.status;
+        reachable = (getRes.status >= 200 && getRes.status < 400);
+      } catch (_) {
+        reachable = false;
+      }
+    }
+  } catch (err) {
+    status = err.response?.status || 500;
+    reachable = false;
+  }
+
+  const entry = { reachable, status, timestamp: now };
+  linkValidationCache.set(targetUrl, entry);
+  return entry;
+}
+
+// GET /api/validate-link?url=...
+app.get('/api/validate-link', async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).json({ error: 'Missing url query param' });
+  const result = await checkUrlReachability(String(url));
+  return res.json(result);
+});
+
+// POST /api/validate-links - Batch validation
+app.post('/api/validate-links', async (req, res) => {
+  const urls = Array.isArray(req.body.urls) ? req.body.urls.slice(0, 100) : [];
+  const results = {};
+  await Promise.all(
+    urls.map(async (u) => {
+      const checked = await checkUrlReachability(u);
+      results[u] = checked.reachable;
+    })
+  );
+  return res.json({ results });
+});
 
 // GET /api/health - Diagnostic telemetry
 app.get('/api/health', async (_req, res) => {
@@ -958,7 +1136,7 @@ app.get('/api/sources', (_req, res) => {
       id: 'gdelt',
       name: 'GDELT DOC 2.0 (Global Discovery)',
       type: 'REST API',
-      configured: false, // Inactive upstream (infinite TLS renegotiation)
+      configured: true,
       provider: 'GDELT Project',
       category: 'Discovery',
       intervalSec: 60
@@ -1095,6 +1273,21 @@ app.get('/api/search/live', async (req, res) => {
   }
 });
 
+// POST /api/verify-threat - On-demand threat deep-dive verification (Google Custom Search)
+app.post('/api/verify-threat', async (req, res) => {
+  const { query } = req.body || {};
+  if (!query || typeof query !== 'string' || !query.trim()) {
+    return res.status(400).json({ success: false, error: 'Query required' });
+  }
+
+  try {
+    const results = await fetchVerificationContext(query.trim());
+    res.json({ success: true, count: results.length, data: results });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/articles - Fetch active crisis feeds
 app.get('/api/articles', async (_req, res) => {
   try {
@@ -1176,18 +1369,23 @@ app.patch('/api/articles/:id/acknowledge', async (req, res) => {
   }
 });
 
+// GET /api/ingestion/diagnostics - Comprehensive real-time provider health telemetry
+app.get('/api/ingestion/diagnostics', (_req, res) => {
+  return res.json(ingestionGateway.getDetailedDiagnostics());
+});
+
 // POST /api/fetch-live - Manual trigger to immediately scrape & ingest authentic live news across all sources
 app.post('/api/fetch-live', async (_req, res) => {
   try {
-    console.log('[API] /api/fetch-live triggered: Fetching real-time authentic news (NewsAPI, GDELT, RSS)...');
-    const items = await fetchMultiSourceNews(processIngest);
+    console.log('[API] /api/fetch-live triggered: Running on-demand manual fetch across active providers...');
+    const results = await ingestionGateway.triggerManualFetch();
+    const articles = memoryArticles.slice(0, 30);
     return res.status(200).json({
       success: true,
       timestamp: new Date().toISOString(),
-      processed: items ? items.length : 0,
-      message: 'Live news scraped and processed successfully across verified sources',
-      count: items ? items.length : 0,
-      articles: items || []
+      results,
+      count: articles.length,
+      articles
     });
   } catch (error) {
     console.error('[API] /api/fetch-live error:', error.message);
@@ -1195,16 +1393,17 @@ app.post('/api/fetch-live', async (_req, res) => {
   }
 });
 
-// Backward compatibility alias for any legacy triggers (points strictly to real live fetch, zero mock data)
+// Backward compatibility alias for legacy triggers
 app.post('/api/simulate-crisis', async (_req, res) => {
   try {
-    console.log('[API] /api/simulate-crisis called: redirecting to live authentic multi-source fetch...');
-    const items = await fetchMultiSourceNews(processIngest);
+    console.log('[API] /api/simulate-crisis called: redirecting to gateway manual fetch...');
+    const results = await ingestionGateway.triggerManualFetch();
     return res.status(200).json({
       success: true,
-      message: 'Live news fetched',
-      count: items ? items.length : 0,
-      articles: items || []
+      message: 'Gateway manual fetch triggered',
+      results,
+      count: memoryArticles.length,
+      articles: memoryArticles.slice(0, 30)
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -1214,8 +1413,8 @@ app.post('/api/simulate-crisis', async (_req, res) => {
 // POST /api/news/fetch - On-demand trigger for live multi-source aggregation
 app.post('/api/news/fetch', async (_req, res) => {
   try {
-    const items = await fetchMultiSourceNews(processIngest);
-    return res.json({ success: true, count: items ? items.length : 0, articles: items || [] });
+    const results = await ingestionGateway.triggerManualFetch();
+    return res.json({ success: true, results, count: memoryArticles.length, articles: memoryArticles.slice(0, 30) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1232,9 +1431,6 @@ app.get('/api/debug/triage-stats', (_req, res) => {
 // ============================================================================
 // 6. SERVER LAUNCH & AUTOMATED BACKGROUND INGESTION ENGINE
 // ============================================================================
-let isBackgroundFetching = false;
-let currentCycleNumber = 0;
-
 async function initSourceTelemetryFromDb() {
   if (!supabase) return;
   try {
@@ -1268,26 +1464,6 @@ async function initSourceTelemetryFromDb() {
   }
 }
 
-async function startBackgroundIngestion() {
-  if (isBackgroundFetching) return;
-  isBackgroundFetching = true;
-  currentCycleNumber++;
-  startNewTriageCycle(currentCycleNumber);
-  try {
-    console.log(`\n[Engine] ⚡ Initiating automated background fetch (Cycle #${currentCycleNumber})...`);
-    await fetchMultiSourceNews(processIngest, currentCycleNumber);
-    logCycleTriageSummary();
-  } catch (err) {
-    console.error('[Engine] Background fetch error:', err.message);
-  } finally {
-    isBackgroundFetching = false;
-    // 20-second non-overlapping poll: tightest safe interval for RSS/API sources
-    // without triggering rate-limits (Google News RSS: no hard limit at this cadence,
-    // Currents/NewsData/Guardian: each 45+ second API round-trip makes this safe).
-    setTimeout(startBackgroundIngestion, 20000); // Poll every 20 seconds
-  }
-}
-
 const isTestRun = process.env.NODE_ENV === 'test' || Boolean(process.argv[1] && (
   process.argv[1].includes('test_verify') ||
   process.argv[1].includes('test.') ||
@@ -1295,15 +1471,15 @@ const isTestRun = process.env.NODE_ENV === 'test' || Boolean(process.argv[1] && 
 ));
 
 if (!isTestRun) {
-  app.listen(PORT, async () => {
+  const server = app.listen(PORT, async () => {
     console.log(`\n=============================================================`);
     console.log(`🚀 [Vee-Alert Backend] Listening on http://localhost:${PORT}`);
     console.log(`🧠 [Local AI Engine] Ollama model: ${OLLAMA_MODEL} at ${OLLAMA_BASE_URL}`);
     console.log(`📦 [Database] Supabase ${supabase ? 'Configured & Connected' : 'Not configured (In-memory fallback)'}`);
     console.log(`⚡ [SLA Target] Sub-60s polling lag on RSS; upstream aggregator lag varies by source`);
     console.log(`🛡️ [Deduplicator] SHA-256 Pre-Database O(1) deduplication active`);
-    console.log(`📰 [News Sources] Multi-Source Matrix (NewsAPI, Currents, GNews, NewsData, Guardian, Publisher RSS, Bluesky Trial)`);
-    console.log(`⏱️ [Automated Ingestion] 20-second non-overlapping recursive engine active`);
+    console.log(`📰 [News Sources] Low-Latency Parallel Ingestion Gateway Active`);
+    console.log(`⏱️ [Scheduler] Single Authoritative Gateway Scheduler with Independent Provider Cooldowns`);
     console.log(`=============================================================\n`);
 
     // Pre-warm local Ollama weights in VRAM to eliminate cold inference lag
@@ -1317,6 +1493,19 @@ if (!isTestRun) {
 
     // Start the low-latency parallel ingestion gateway
     await ingestionGateway.start();
+  });
+
+  // Handle port-already-in-use gracefully instead of crashing with unhandled error event
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n❌ [Vee-Alert] Port ${PORT} is already in use.`);
+      console.error(`   Another server process is still running.`);
+      console.error(`   Fix: run  netstat -ano | findstr :${PORT}  to find the PID,`);
+      console.error(`   then:     taskkill /F /PID <PID>\n`);
+    } else {
+      console.error(`\n❌ [Vee-Alert] Server error:`, err.message);
+    }
+    process.exit(1);
   });
 }
 

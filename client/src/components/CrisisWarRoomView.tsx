@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { formatDistanceToNow } from 'date-fns';
 import {
   PhoneCall,
@@ -144,6 +145,46 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
   const [scrolledDown, setScrolledDown] = useState(false);
   const [unseenCount, setUnseenCount] = useState(0);
   const previousArticlesCount = useRef(articles.length);
+
+  // Real-time link validation state & session cache
+  const [unreachableUrls, setUnreachableUrls] = useState<Set<string>>(() => new Set());
+  const checkedUrlsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const urlsToCheck: string[] = [];
+    for (const a of articles) {
+      if (a.url && !checkedUrlsRef.current.has(a.url)) {
+        urlsToCheck.push(a.url);
+        checkedUrlsRef.current.add(a.url);
+      }
+    }
+    if (urlsToCheck.length === 0) return;
+
+    const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:5000';
+    axios
+      .post(`${apiBase}/api/validate-links`, { urls: urlsToCheck })
+      .then((res) => {
+        const results = res.data?.results;
+        if (results) {
+          const newlyUnreachable: string[] = [];
+          for (const [url, reachable] of Object.entries(results)) {
+            if (reachable === false) {
+              newlyUnreachable.push(url);
+            }
+          }
+          if (newlyUnreachable.length > 0) {
+            setUnreachableUrls((prev) => {
+              const next = new Set(prev);
+              newlyUnreachable.forEach((u) => next.add(u));
+              return next;
+            });
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('[CrisisWarRoomView] Link validation check notice:', err.message);
+      });
+  }, [articles]);
 
   // Dynamic live ticker: automatically re-renders every 30s so relative times increment naturally without page reload
   const [, setTick] = useState(0);
@@ -833,7 +874,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                       {/* Bottom Row Action Buttons */}
                       <div className="flex items-center justify-between pt-2 border-t border-slate-100 flex-wrap gap-2">
                         {/* View Source functional link */}
-                        {article.url ? (
+                        {article.url && !unreachableUrls.has(article.url) ? (
                           <a
                             href={article.url}
                             target="_blank"
@@ -843,6 +884,14 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                             <ExternalLink className="w-3.5 h-3.5" />
                             <span>View Source</span>
                           </a>
+                        ) : article.url && unreachableUrls.has(article.url) ? (
+                          <span
+                            className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-100/90 px-2 py-1 rounded cursor-not-allowed select-none"
+                            title="Source unavailable (publisher link returned 404 or dead link)"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 opacity-40" />
+                            <span>Source unavailable</span>
+                          </span>
                         ) : (
                           <span className="text-xs text-slate-400">Verified Wire Source</span>
                         )}

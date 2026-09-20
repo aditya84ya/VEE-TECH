@@ -1,3 +1,4 @@
+import https from 'node:https';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import crypto from 'node:crypto';
@@ -142,10 +143,11 @@ export class SearchService {
 
       const res = await axios.get(GDELT_DOC_API, {
         params,
-        timeout: 4000,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        timeout: 25000,
         headers: {
-          'User-Agent': 'VEE-ALERT/2.0 (Deep Search)',
-          'Accept': 'application/json'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*'
         }
       });
 

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { ProviderAdapter } from '../ProviderAdapter.js';
+import { logTraceEvent, STAGES, maskUrlCredentials } from '../TraceLogger.js';
 
 function cleanHtml(str) {
   if (!str) return '';
@@ -25,6 +26,11 @@ export class EventRegistryAdapter extends ProviderAdapter {
     });
     this.apiKey = options.apiKey || (process.env.EVENT_REGISTRY_API_KEY || '').trim();
     this.newestUri = null;
+    this._hasReceivedFirstArticle = false;
+    if (!this.apiKey) {
+      this.metrics.status = 'DISABLED';
+      this.metrics.lastError = 'EVENT_REGISTRY_API_KEY not configured in server/.env';
+    }
   }
 
   getCursor() {
@@ -35,19 +41,40 @@ export class EventRegistryAdapter extends ProviderAdapter {
     this.newestUri = cursor;
   }
 
-  async fetch() {
-    if (Date.now() < this.cooldownUntil) {
-      const remainingSec = Math.ceil((this.cooldownUntil - Date.now()) / 1000);
-      console.log(`[ProviderAdapter:${this.providerName}] ⏭ Skipped fetch — ${remainingSec}s remaining in cooldown`);
-      return [];
+  async onStart() {
+    if (!this.apiKey) {
+      this.metrics.status = 'DISABLED';
+      this.metrics.lastError = 'EVENT_REGISTRY_API_KEY not configured in server/.env';
+      console.warn('[EventRegistry] ⚠️ EVENT_REGISTRY_API_KEY is not configured in server/.env. Stream disabled.');
+      return;
     }
+    console.log('[EventRegistry] STREAM_CONNECTED');
+  }
+
+  async fetch(opts = {}) {
+    const traceId = opts.traceId || `tr_eventregistry_${Date.now()}`;
 
     if (!this.apiKey) {
       this.metrics.status = 'DISABLED';
+      this.metrics.lastError = 'EVENT_REGISTRY_API_KEY not configured in server/.env';
+      logTraceEvent({
+        stage: STAGES.PROVIDER_FETCH_SKIPPED_NOT_CONFIGURED,
+        traceId,
+        provider: 'eventregistry',
+        reason: 'EVENT_REGISTRY_API_KEY not configured in server/.env'
+      });
       return [];
     }
 
-    // Use minuteStreamArticles if available, else getArticles
+    const endpoint = 'https://eventregistry.org/api/v1/article/getArticles';
+    logTraceEvent({
+      stage: STAGES.HTTP_REQUEST_START,
+      traceId,
+      provider: 'eventregistry',
+      extra: { endpoint, apiKey: 'REDACTED' }
+    });
+
+    const reqStart = Date.now();
     try {
       const params = {
         apiKey: this.apiKey,
@@ -60,19 +87,57 @@ export class EventRegistryAdapter extends ProviderAdapter {
         lang: 'eng'
       };
 
-      const res = await axios.post('https://eventregistry.org/api/v1/article/getArticles', params, {
+      const res = await axios.post(endpoint, params, {
         timeout: this.timeoutMs,
         headers: { 'Content-Type': 'application/json' }
       });
 
+      const reqDuration = Date.now() - reqStart;
       const articles = res.data?.articles?.results || [];
 
-      if (articles.length > 0 && articles[0].uri) {
-        this.saveCursor(articles[0].uri);
+      logTraceEvent({
+        stage: STAGES.HTTP_RESPONSE,
+        traceId,
+        provider: 'eventregistry',
+        durationMs: reqDuration,
+        extra: {
+          status: res.status,
+          articlesReceived: articles.length
+        }
+      });
+
+      console.log(`[EventRegistry] ARTICLES_RECEIVED=${articles.length}`);
+
+      if (articles.length > 0) {
+        if (!this._hasReceivedFirstArticle) {
+          this._hasReceivedFirstArticle = true;
+          console.log(`[EventRegistry] FIRST_ARTICLE_RECEIVED: "${articles[0].title?.slice(0, 50)}..."`);
+        }
+        if (articles[0].uri) {
+          this.saveCursor(articles[0].uri);
+          console.log(`[EventRegistry] CURSOR_UPDATED ${articles[0].uri}`);
+        }
       }
 
-      return articles;
+      return {
+        items: articles,
+        stats: {
+          rawCount: articles.length,
+          staleCount: 0,
+          duplicateCount: 0
+        }
+      };
     } catch (err) {
+      const reqDuration = Date.now() - reqStart;
+      logTraceEvent({
+        stage: STAGES.HTTP_ERROR,
+        traceId,
+        provider: 'eventregistry',
+        durationMs: reqDuration,
+        status: err.response?.status || null,
+        reason: err.message
+      });
+      console.error(`[EventRegistry] ERROR=${err.message}`);
       throw err;
     }
   }
@@ -101,7 +166,7 @@ export class EventRegistryAdapter extends ProviderAdapter {
       language: raw.lang || 'en',
       country: null,
       publishedAt,
-      providerAvailableAt: publishedAt,
+      providerAvailableAt: null, // Syndication proxy
       receivedAt: now,
       ingestedAt: now
     };

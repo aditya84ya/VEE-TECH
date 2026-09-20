@@ -127,13 +127,39 @@ export class Deduplicator {
    * }}
    */
   evaluate(article) {
-    const { articleId, id, url, title, publisher, source_name, provider, api_source } = article;
-    const effectiveId = articleId || id;
+    const {
+      articleId,
+      id,
+      providerArticleId,
+      url,
+      canonicalUrl,
+      sourceUrl,
+      publisherUrl,
+      title,
+      publisher,
+      source_name,
+      provider,
+      api_source
+    } = article;
+
+    const effectiveId = providerArticleId || articleId || id;
     const pubName = publisher || source_name || 'Verified News Wire';
     const providerName = provider || api_source || 'Wire';
 
-    // LAYER 1: Exact Provider Article ID Match
-    if (effectiveId && this.seenIds.has(String(effectiveId))) {
+    // LAYER 1: Provider Article ID Match (stable provider identifier)
+    if (providerArticleId && this.seenIds.has(String(providerArticleId))) {
+      const decision = {
+        isDuplicate: true,
+        dedupDecision: 'DROPPED',
+        dedupLayer: 'Layer 1: Provider Article ID',
+        dedupReason: `Provider Article ID ${providerArticleId} already recorded`,
+        duplicateOf: String(providerArticleId),
+        duplicateStatus: 'EXACT_DUPLICATE',
+        duplicateDetectedAt: new Date().toISOString()
+      };
+      this._recordDuplicateAudit(article, decision);
+      return decision;
+    } else if (effectiveId && this.seenIds.has(String(effectiveId))) {
       const decision = {
         isDuplicate: true,
         dedupDecision: 'DROPPED',
@@ -147,40 +173,36 @@ export class Deduplicator {
       return decision;
     }
 
-    // LAYER 2: Canonical URL Match
-    if (url) {
-      const canonical = this.canonicalUrl(url);
-      if (canonical && this.seenCanonicalUrls.has(canonical)) {
-        const decision = {
-          isDuplicate: true,
-          dedupDecision: 'DROPPED',
-          dedupLayer: 'Layer 2: Canonical URL',
-          dedupReason: `Canonical URL ${canonical} already recorded`,
-          duplicateOf: canonical,
-          duplicateStatus: 'EXACT_DUPLICATE',
-          duplicateDetectedAt: new Date().toISOString()
-        };
-        this._recordDuplicateAudit(article, decision);
-        return decision;
-      }
+    // LAYER 2: Publisher Canonical URL Match
+    const effectiveCanonUrl = canonicalUrl ? this.canonicalUrl(canonicalUrl) : (url ? this.canonicalUrl(url) : null);
+    if (effectiveCanonUrl && this.seenCanonicalUrls.has(effectiveCanonUrl)) {
+      const decision = {
+        isDuplicate: true,
+        dedupDecision: 'DROPPED',
+        dedupLayer: 'Layer 2: Publisher Canonical URL',
+        dedupReason: `Publisher Canonical URL ${effectiveCanonUrl} already recorded`,
+        duplicateOf: effectiveCanonUrl,
+        duplicateStatus: 'EXACT_DUPLICATE',
+        duplicateDetectedAt: new Date().toISOString()
+      };
+      this._recordDuplicateAudit(article, decision);
+      return decision;
     }
 
     // LAYER 3: Normalized URL Match
-    if (url) {
-      const normalized = this.normalizeUrl(url);
-      if (normalized && this.seenNormalizedUrls.has(normalized)) {
-        const decision = {
-          isDuplicate: true,
-          dedupDecision: 'DROPPED',
-          dedupLayer: 'Layer 3: Normalized URL',
-          dedupReason: 'Normalized URL match',
-          duplicateOf: normalized,
-          duplicateStatus: 'EXACT_DUPLICATE',
-          duplicateDetectedAt: new Date().toISOString()
-        };
-        this._recordDuplicateAudit(article, decision);
-        return decision;
-      }
+    const effectiveNormUrl = url ? this.normalizeUrl(url) : (sourceUrl ? this.normalizeUrl(sourceUrl) : null);
+    if (effectiveNormUrl && this.seenNormalizedUrls.has(effectiveNormUrl)) {
+      const decision = {
+        isDuplicate: true,
+        dedupDecision: 'DROPPED',
+        dedupLayer: 'Layer 3: Normalized URL',
+        dedupReason: `Normalized URL match ${effectiveNormUrl}`,
+        duplicateOf: effectiveNormUrl,
+        duplicateStatus: 'EXACT_DUPLICATE',
+        duplicateDetectedAt: new Date().toISOString()
+      };
+      this._recordDuplicateAudit(article, decision);
+      return decision;
     }
 
     // LAYER 4: Strong Title + Publisher Fingerprint with 2-hour TTL eviction (warroom-wire pattern)
@@ -193,7 +215,7 @@ export class Deduplicator {
           const decision = {
             isDuplicate: true,
             dedupDecision: 'DROPPED',
-            dedupLayer: 'Layer 4: Title+Publisher Fingerprint',
+            dedupLayer: 'Layer 4: Title + Publisher Fingerprint',
             dedupReason: `Same title already published by ${pubName}`,
             duplicateOf: existing.articleId,
             duplicateStatus: 'EXACT_DUPLICATE',
@@ -209,8 +231,7 @@ export class Deduplicator {
     }
 
     // LAYER 5: STORY CLUSTERING & SOURCE CORROBORATION
-    // If different publishers cover the same story (e.g. Economic Times and Livemint both cover TCS chip design),
-    // we DO NOT drop the article. We preserve it and link it into a Story Cluster!
+    // Different publishers covering the same event are NOT deleted. They are linked through storyClusterId!
     const cluster = this._assignStoryCluster(title, effectiveId, pubName, providerName);
 
     // Register unique article into deduplication caches
@@ -273,17 +294,21 @@ export class Deduplicator {
    * Records a unique article into deduplication caches
    */
   record(article) {
-    const { articleId, id, url, title, publisher, source_name } = article;
-    const effectiveId = articleId || id;
+    const { articleId, id, providerArticleId, url, canonicalUrl, sourceUrl, title, publisher, source_name } = article;
+    const effectiveId = providerArticleId || articleId || id;
     const pubName = publisher || source_name;
 
     if (effectiveId) this.seenIds.add(String(effectiveId));
-    if (url) {
-      const canonical = this.canonicalUrl(url);
-      if (canonical) this.seenCanonicalUrls.add(canonical);
-      const normalized = this.normalizeUrl(url);
-      if (normalized) this.seenNormalizedUrls.add(normalized);
-    }
+    if (providerArticleId && providerArticleId !== effectiveId) this.seenIds.add(String(providerArticleId));
+    if (articleId && articleId !== effectiveId) this.seenIds.add(String(articleId));
+    if (id && id !== effectiveId) this.seenIds.add(String(id));
+
+    const effectiveCanonUrl = canonicalUrl ? this.canonicalUrl(canonicalUrl) : (url ? this.canonicalUrl(url) : null);
+    if (effectiveCanonUrl) this.seenCanonicalUrls.add(effectiveCanonUrl);
+
+    const effectiveNormUrl = url ? this.normalizeUrl(url) : (sourceUrl ? this.normalizeUrl(sourceUrl) : null);
+    if (effectiveNormUrl) this.seenNormalizedUrls.add(effectiveNormUrl);
+
     if (title && pubName) {
       const fp = this.computeTitleSourceFingerprint(title, pubName);
       this.seenTitleSourceFingerprints.set(fp, { articleId: effectiveId, timestamp: Date.now(), title, publisher: pubName });

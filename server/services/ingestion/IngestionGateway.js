@@ -12,8 +12,11 @@ import { CurrentsAdapter } from './providers/CurrentsAdapter.js';
 import { GNewsAdapter } from './providers/GNewsAdapter.js';
 import { EventRegistryAdapter } from './providers/EventRegistryAdapter.js';
 import { BlueskyJetstreamAdapter } from './providers/BlueskyJetstreamAdapter.js';
+import { BseAnnouncementsAdapter } from './providers/BseAnnouncementsAdapter.js';
+import { NewsSitemapAdapter } from './providers/NewsSitemapAdapter.js';
 import { GDELTAdapter } from './providers/GDELTAdapter.js';
 import { validateEntityContext } from '../mediaMetrics.js';
+import { logTraceEvent, STAGES } from './TraceLogger.js';
 
 const TARGET_ENTITY_REGEX = /\b(Infosys|TCS|Tata Consultancy Services|Wipro|Accenture|Finacle)\b/i;
 
@@ -40,6 +43,10 @@ export class IngestionGateway {
       alertRulesEvaluator: options.alertRulesEvaluator,
       notifiers: options.notifiers,
       onArticleUpdated: (updated) => {
+        const memIdx = this.memoryArticles.findIndex((a) => a.id === updated.id);
+        if (memIdx !== -1) {
+          this.memoryArticles[memIdx] = { ...this.memoryArticles[memIdx], ...updated };
+        }
         if (this.onArticleUpdated) this.onArticleUpdated(updated);
       }
     });
@@ -47,9 +54,11 @@ export class IngestionGateway {
     // Initialize multi-provider pool (including real-time streaming)
     this.adapters = [
       new BlueskyJetstreamAdapter(),
+      new BseAnnouncementsAdapter(),
       new GuardianAdapter(),
       new GoogleRssAdapter(),
       new InstitutionalRssAdapter(),
+      new NewsSitemapAdapter(),
       new NewsDataAdapter(),
       new NewsApiAdapter(),
       new CurrentsAdapter(),
@@ -233,11 +242,19 @@ export class IngestionGateway {
    */
   async handleIncomingArticle(normalized) {
     const fastStart = Date.now();
+    const traceId = normalized.traceId || `tr_${randomUUID().replace(/-/g, '').slice(0, 10)}`;
     const receivedAt = normalized.receivedAt || new Date().toISOString();
     this.stats.received++;
 
     const title = normalized.title || '';
     const content = normalized.content || normalized.description || title;
+
+    logTraceEvent({
+      stage: STAGES.NORMALIZED,
+      traceId,
+      provider: normalized.provider,
+      extra: { title: title.slice(0, 60), url: normalized.url }
+    });
 
     // Guardrail: Target Entity Relevance & Disambiguation Pre-Filter
     if (!TARGET_ENTITY_REGEX.test(title) && !TARGET_ENTITY_REGEX.test(content)) {
@@ -265,23 +282,32 @@ export class IngestionGateway {
       gdelt: 'GDELT 2.0 Global Event Wire'
     };
 
-    // Guardrail: Hard Recency Cutoff Window (12 Hours default)
-    // Enforces absolute maximum article age across all sources uniformly
+    // Guardrail: Recency Cutoff Window
+    // Push streams enforce strict 12h; Syndicated RSS/Aggregators allow 48h to prevent dropping syndicated news
+    const isSyndicated = normalized.provider === 'institutional' || normalized.provider === 'googlenews' || normalized.provider === 'newsdata';
+    const effectiveMaxAgeHours = isSyndicated ? Math.max(this.maxArticleAgeHours, 48) : this.maxArticleAgeHours;
     const publishedAt = normalized.publishedAt || new Date().toISOString();
     const pubTime = new Date(publishedAt).getTime();
     if (!isNaN(pubTime)) {
       const ageHours = (Date.now() - pubTime) / (3600 * 1000);
-      if (ageHours > this.maxArticleAgeHours) {
+      if (ageHours > effectiveMaxAgeHours) {
         this.stats.droppedStale++;
         const ageDesc = ageHours >= 48 ? `${(ageHours / 24).toFixed(1)} days` : `${ageHours.toFixed(1)} hours`;
-        console.log(`[Guardrail] 🚫 DROPPED STALE: "${title.slice(0, 50)}..." (published ${ageDesc} ago exceeds ${this.maxArticleAgeHours}h window)`);
+        console.log(`[Guardrail] 🚫 DROPPED STALE: "${title.slice(0, 50)}..." (published ${ageDesc} ago exceeds ${effectiveMaxAgeHours}h window)`);
         return; // DROP IMMEDIATELY BEFORE DEDUP OR DB INSERT
       }
     }
 
+    logTraceEvent({
+      stage: STAGES.VALIDATED,
+      traceId,
+      provider: normalized.provider,
+      extra: { entity, publishedAt }
+    });
+
     const pubName = normalized.publisher || 'Verified News Wire';
     const apiSource = providerDisplayNames[normalized.provider] || normalized.provider;
-    const articleUrl = normalized.canonicalUrl || normalized.url;
+    const articleUrl = normalized.url || normalized.canonicalUrl;
     const candidateId = randomUUID();
 
     // =========================================================================
@@ -289,7 +315,11 @@ export class IngestionGateway {
     // =========================================================================
     const dedup = this.deduplicator.evaluate({
       articleId: candidateId,
-      url: articleUrl,
+      providerArticleId: normalized.providerArticleId,
+      url: normalized.url || articleUrl,
+      sourceUrl: normalized.sourceUrl,
+      publisherUrl: normalized.publisherUrl,
+      canonicalUrl: normalized.canonicalUrl || articleUrl,
       title: title,
       publisher: pubName,
       source_name: pubName,
@@ -298,9 +328,22 @@ export class IngestionGateway {
 
     if (dedup.isDuplicate) {
       this.stats.droppedDuplicates++;
+      logTraceEvent({
+        stage: STAGES.DEDUP_REJECTED,
+        traceId,
+        provider: normalized.provider,
+        reason: `${dedup.dedupLayer}: ${dedup.dedupReason}`
+      });
       console.log(`[Deduplicator] 🚫 DROPPED DUPLICATE [${dedup.dedupLayer}]: "${title.slice(0, 50)}..." (${dedup.dedupReason})`);
       return; // DROP IMMEDIATELY — NOTHING REACHES THE DATABASE
     }
+
+    logTraceEvent({
+      stage: STAGES.DEDUP_ACCEPTED,
+      traceId,
+      provider: normalized.provider,
+      extra: { storyClusterId: dedup.storyClusterId }
+    });
 
     // =========================================================================
     // 2. TIMESTAMPS & PAYLOAD PREPARATION (ONLY FOR UNIQUE ARTICLES)
@@ -342,6 +385,13 @@ export class IngestionGateway {
     // =========================================================================
     // 3. FAST PERSISTENCE: Save unique article to Supabase (<100ms)
     // =========================================================================
+    logTraceEvent({
+      stage: STAGES.DB_INSERT_START,
+      traceId,
+      articleId: candidateId,
+      provider: normalized.provider
+    });
+
     let committedRecord = articlePayload;
     if (this.supabase) {
       try {
@@ -352,11 +402,25 @@ export class IngestionGateway {
           .single();
 
         if (error) {
+          logTraceEvent({
+            stage: STAGES.DB_INSERT_ERROR,
+            traceId,
+            articleId: candidateId,
+            provider: normalized.provider,
+            reason: error.message
+          });
           console.error(`[IngestionGateway] ❌ Fast-path DB insert error: ${error.message}`);
         } else if (data) {
           committedRecord = data;
         }
       } catch (dbErr) {
+        logTraceEvent({
+          stage: STAGES.DB_INSERT_ERROR,
+          traceId,
+          articleId: candidateId,
+          provider: normalized.provider,
+          reason: dbErr.message
+        });
         console.error(`[IngestionGateway] ❌ Supabase communication failure: ${dbErr.message}`);
       }
     }
@@ -365,6 +429,14 @@ export class IngestionGateway {
     this._recordFastPathLatency(fastDuration);
     this.stats.committed++;
 
+    logTraceEvent({
+      stage: STAGES.DB_INSERT_SUCCESS,
+      traceId,
+      articleId: committedRecord.id,
+      provider: normalized.provider,
+      durationMs: fastDuration
+    });
+
     console.log(`[IngestionGateway] ⚡ FAST-PATH RAW COMMITTED: ID ${committedRecord.id} | Source: "${committedRecord.api_source}" | Lag: ${detectionLagSec}s | Fast-Path Time: ${fastDuration}ms`);
 
     // =========================================================================
@@ -372,6 +444,7 @@ export class IngestionGateway {
     // =========================================================================
     const enrichedRecord = {
       ...committedRecord,
+      traceId,
       storyClusterId: dedup.storyClusterId,
       sourceCount: dedup.sourceCount,
       uniquePublisherCount: dedup.uniquePublisherCount,
@@ -385,6 +458,13 @@ export class IngestionGateway {
     if (this.memoryArticles.length > 500) this.memoryArticles.pop();
 
     // Broadcast Realtime Event
+    logTraceEvent({
+      stage: STAGES.REALTIME_BROADCAST,
+      traceId,
+      articleId: committedRecord.id,
+      provider: normalized.provider
+    });
+
     if (this.onArticleCommitted) {
       try {
         this.onArticleCommitted(enrichedRecord);
@@ -394,6 +474,13 @@ export class IngestionGateway {
     }
 
     // Enqueue for Asynchronous Background AI Triage
+    logTraceEvent({
+      stage: STAGES.AI_QUEUE,
+      traceId,
+      articleId: committedRecord.id,
+      provider: normalized.provider
+    });
+
     this.aiTriageQueue.enqueue(enrichedRecord);
   }
 
@@ -402,6 +489,84 @@ export class IngestionGateway {
     if (this.stats.fastPathLatencies.length > 50) this.stats.fastPathLatencies.shift();
     const sum = this.stats.fastPathLatencies.reduce((a, b) => a + b, 0);
     this.stats.avgFastPathLatencyMs = Math.round(sum / this.stats.fastPathLatencies.length);
+  }
+
+  /**
+   * Triggers an on-demand manual fetch across all eligible providers (e.g. for /api/fetch-live)
+   * Respects each provider's canFetch() and cooldownUntil.
+   */
+  async triggerManualFetch() {
+    console.log('[IngestionGateway] ⚡ Triggering manual fetch across all eligible providers...');
+    const results = [];
+    for (const adapter of this.adapters) {
+      try {
+        const items = await adapter.pollNow();
+        results.push({ provider: adapter.providerName, count: items?.length || 0 });
+      } catch (err) {
+        results.push({ provider: adapter.providerName, error: err.message });
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Detailed diagnostics matching Phase 12 specification
+   */
+  getDetailedDiagnostics() {
+    const providersMap = {};
+    let activeProviderCount = 0;
+    let healthyProviderCount = 0;
+    let cooldownProviderCount = 0;
+    let quotaExhaustedProviderCount = 0;
+    let lastSuccessfulArticleAt = null;
+    let lastSuccessfulProvider = null;
+
+    for (const adapter of this.adapters) {
+      const health = adapter.getHealth();
+      providersMap[adapter.providerName] = health;
+
+      if (health.status === 'ACTIVE' || health.status === 'POLLING' || health.status === 'CONNECTED') {
+        activeProviderCount++;
+        healthyProviderCount++;
+      } else if (health.status === 'COOLDOWN') {
+        cooldownProviderCount++;
+      } else if (health.status === 'QUOTA_EXHAUSTED') {
+        quotaExhaustedProviderCount++;
+      }
+
+      if (health.lastArticleAt) {
+        if (!lastSuccessfulArticleAt || new Date(health.lastArticleAt) > new Date(lastSuccessfulArticleAt)) {
+          lastSuccessfulArticleAt = health.lastArticleAt;
+          lastSuccessfulProvider = adapter.providerName;
+        }
+      }
+    }
+
+    const now = Date.now();
+    const fiveMinAgo = now - 5 * 60 * 1000;
+    const fifteenMinAgo = now - 15 * 60 * 1000;
+
+    const totalArticlesLast5Minutes = this.memoryArticles.filter(a => {
+      const t = new Date(a.ingested_at || a.created_at).getTime();
+      return !isNaN(t) && t >= fiveMinAgo;
+    }).length;
+
+    const totalArticlesLast15Minutes = this.memoryArticles.filter(a => {
+      const t = new Date(a.ingested_at || a.created_at).getTime();
+      return !isNaN(t) && t >= fifteenMinAgo;
+    }).length;
+
+    return {
+      providers: providersMap,
+      activeProviderCount,
+      healthyProviderCount,
+      cooldownProviderCount,
+      quotaExhaustedProviderCount,
+      lastSuccessfulArticleAt,
+      lastSuccessfulProvider,
+      totalArticlesLast5Minutes,
+      totalArticlesLast15Minutes
+    };
   }
 
   /**

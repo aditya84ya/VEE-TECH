@@ -1,18 +1,11 @@
+import http from 'node:http';
+import https from 'node:https';
 import axios from 'axios';
 import { ProviderAdapter } from '../ProviderAdapter.js';
+import { logTraceEvent, STAGES, maskUrlCredentials } from '../TraceLogger.js';
 
-function cleanHtml(str) {
-  if (!str) return '';
-  return str
-    .replace(/<[^>]*>?/gm, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 8 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 8 });
 
 export class GNewsAdapter extends ProviderAdapter {
   constructor(options = {}) {
@@ -35,50 +28,92 @@ export class GNewsAdapter extends ProviderAdapter {
     this.lastCursor = cursor;
   }
 
-  async fetch() {
-    if (Date.now() < this.cooldownUntil) {
-      const remainingSec = Math.ceil((this.cooldownUntil - Date.now()) / 1000);
-      console.log(`[ProviderAdapter:${this.providerName}] ⏭ Skipped fetch — ${remainingSec}s remaining in cooldown`);
-      return [];
-    }
+  async fetch(opts = {}) {
+    const traceId = opts.traceId || `tr_gnews_${Date.now()}`;
 
     if (!this.apiKey) {
       this.metrics.status = 'DISABLED';
+      logTraceEvent({
+        stage: STAGES.PROVIDER_FETCH_SKIPPED_NOT_CONFIGURED,
+        traceId,
+        provider: 'gnews',
+        reason: 'GNEWS_API_KEY missing'
+      });
       return [];
     }
 
     const query = '(Infosys OR "Tata Consultancy Services" OR Wipro OR Accenture)';
     const fromParam = this.lastCursor || new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const endpoint = 'https://gnews.io/api/v4/search';
+    const maskedUrl = `${endpoint}?q=${encodeURIComponent(query)}&apikey=REDACTED&from=${fromParam}&lang=en`;
 
-    const res = await axios.get('https://gnews.io/api/v4/search', {
-      params: {
-        q: query,
-        lang: 'en',
-        sortby: 'publishedAt',
-        max: 10,
-        apikey: this.apiKey,
-        from: fromParam
-      },
-      headers: {
-        'User-Agent': 'VeeAlert/2.0 (Realtime News Architecture)'
-      },
-      timeout: this.timeoutMs
+    logTraceEvent({
+      stage: STAGES.HTTP_REQUEST_START,
+      traceId,
+      provider: 'gnews',
+      extra: { url: maskedUrl }
     });
 
-    const articles = res.data?.articles || [];
+    const reqStart = Date.now();
+    try {
+      const res = await axios.get(endpoint, {
+        params: {
+          q: query,
+          lang: 'en',
+          sortby: 'publishedAt',
+          max: 10,
+          apikey: this.apiKey,
+          from: fromParam
+        },
+        headers: {
+          'User-Agent': 'VeeAlert/2.0 (Realtime News Architecture)'
+        },
+        httpAgent,
+        httpsAgent,
+        timeout: this.timeoutMs
+      });
+      const reqDuration = Date.now() - reqStart;
 
-    if (articles.length > 0) {
-      const newestDate = articles
-        .map(a => a.publishedAt)
-        .filter(Boolean)
-        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+      logTraceEvent({
+        stage: STAGES.HTTP_RESPONSE,
+        traceId,
+        provider: 'gnews',
+        durationMs: reqDuration,
+        extra: {
+          status: res.status,
+          contentLength: res.headers['content-length'] || JSON.stringify(res.data || '').length
+        }
+      });
 
-      if (newestDate) {
-        this.saveCursor(newestDate);
+      const articles = res.data?.articles || [];
+
+      if (articles.length > 0) {
+        const newestDate = articles
+          .map(a => a.publishedAt)
+          .filter(Boolean)
+          .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+
+        if (newestDate) {
+          this.saveCursor(newestDate);
+        }
       }
-    }
 
-    return articles;
+      return {
+        items: articles,
+        stats: { rawCount: articles.length, staleCount: 0, duplicateCount: 0 }
+      };
+    } catch (err) {
+      const reqDuration = Date.now() - reqStart;
+      logTraceEvent({
+        stage: STAGES.HTTP_ERROR,
+        traceId,
+        provider: 'gnews',
+        durationMs: reqDuration,
+        status: err.response?.status || null,
+        reason: err.message
+      });
+      throw err;
+    }
   }
 
   normalize(raw) {
@@ -86,26 +121,22 @@ export class GNewsAdapter extends ProviderAdapter {
 
     const publishedAt = raw.publishedAt ? new Date(raw.publishedAt).toISOString() : null;
     const now = new Date().toISOString();
-    let publisherDomain = null;
-    try {
-      publisherDomain = new URL(raw.url).hostname.replace(/^www\./, '');
-    } catch (_) {}
 
     return {
       providerArticleId: String(raw.url),
       provider: 'gnews',
-      publisher: raw.source?.name || publisherDomain || 'GNews Wire',
-      publisherDomain: publisherDomain || 'gnews.io',
-      title: cleanHtml(raw.title),
+      publisher: raw.source?.name || 'GNews Aggregator',
+      publisherDomain: raw.source?.url ? new URL(raw.source.url).hostname : 'gnews.io',
+      title: raw.title,
       url: raw.url,
       canonicalUrl: raw.url,
-      description: cleanHtml(raw.description || ''),
-      content: cleanHtml(raw.content || raw.description || raw.title),
+      description: raw.description || null,
+      content: raw.content || raw.description || raw.title,
       image: raw.image || null,
       language: 'en',
       country: null,
       publishedAt,
-      providerAvailableAt: publishedAt,
+      providerAvailableAt: null, // Syndication proxy
       receivedAt: now,
       ingestedAt: now
     };

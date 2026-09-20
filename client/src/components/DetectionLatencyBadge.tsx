@@ -53,7 +53,7 @@ export const DetectionLatencyBadge: React.FC<DetectionLatencyBadgeProps> = ({
         <div className="flex flex-col bg-slate-50/90 hover:bg-slate-100/80 transition-colors border border-slate-200/90 rounded-lg px-2.5 py-1.5 shadow-2xs">
           <div className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-500">
             {icon}
-            <span>Detection latency</span>
+            <span>{latency.metricLabel}</span>
             <Info className="w-3 h-3 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -98,6 +98,13 @@ export const DetectionLatencyBadge: React.FC<DetectionLatencyBadgeProps> = ({
               <div className="font-mono text-slate-200 font-semibold">{latency.publishedUtc || 'Unavailable'}</div>
             </div>
 
+            {latency.providerAvailableUtc && (
+              <div>
+                <div className="text-slate-400 text-[10px] font-medium uppercase tracking-wider">Provider Available</div>
+                <div className="font-mono text-slate-200 font-semibold">{latency.providerAvailableUtc}</div>
+              </div>
+            )}
+
             <div>
               <div className="text-slate-400 text-[10px] font-medium uppercase tracking-wider">Detected by VEE-ALERT</div>
               <div className="font-mono text-slate-200 font-semibold">{latency.detectedUtc || 'Unavailable'}</div>
@@ -105,7 +112,7 @@ export const DetectionLatencyBadge: React.FC<DetectionLatencyBadgeProps> = ({
 
             <div className="pt-1 border-t border-slate-800 grid grid-cols-2 gap-2">
               <div>
-                <div className="text-slate-400 text-[10px] font-medium uppercase tracking-wider">Detection latency</div>
+                <div className="text-slate-400 text-[10px] font-medium uppercase tracking-wider">{latency.metricLabel}</div>
                 <div className="font-mono text-slate-100 font-bold text-[13px]">{latency.formattedLatency}</div>
               </div>
               <div>
