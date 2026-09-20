@@ -316,23 +316,19 @@ def trigger_tg_call(seconds: Optional[int] = None) -> Dict[str, Any]:
     if not bin_path:
         return {"channel": "call", "status": "SKIPPED", "error": "Missing binary"}
 
-    log_path = vee_tech_root / "tg_ringer.log"
-    cmd_str = f'"{bin_path}" call {target} --seconds {seconds} >> "{log_path}" 2>&1' if target else f'"{bin_path}" call --seconds {seconds} >> "{log_path}" 2>&1'
+    # Use Windows 'start' command to launch an independent, minimized console.
+    # This completely divorces tg-ringer from Python's lifecycle.
+    target_arg = f" {target}" if target else ""
+    if os.name == "nt":
+        cmd_str = f'start /MIN "" "{bin_path}" call{target_arg} --seconds {seconds}'
+    else:
+        cmd_str = f'"{bin_path}" call{target_arg} --seconds {seconds} > /dev/null 2>&1 &'
 
     try:
-        kwargs = {}
-        if os.name == "nt":
-            # 0x00000008 = DETACHED_PROCESS, 0x00000200 = CREATE_NEW_PROCESS_GROUP
-            kwargs["creationflags"] = 0x00000008 | 0x00000200
-
         subprocess.Popen(
             cmd_str,
             cwd=str(vee_tech_root),
-            shell=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **kwargs
+            shell=True
         )
         print("call : done")
         return {"channel": "call", "status": "SUCCESS"}
