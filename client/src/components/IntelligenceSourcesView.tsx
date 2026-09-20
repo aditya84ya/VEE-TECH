@@ -123,17 +123,17 @@ export const IntelligenceSourcesView: React.FC<IntelligenceSourcesViewProps> = (
       },
       {
         id: 'bluesky',
-        name: 'Bluesky Social Wire',
-        type: 'REST API',
-        description: 'Disabled: AT Protocol endpoint CDN-blocked (BunnyCDN-IN1) for Indian IP ranges. No auth fix available. Re-enable if network conditions change.',
+        name: 'Bluesky Jetstream Firehose (Social Wire)',
+        type: 'AT Protocol',
+        description: 'Real-time WebSocket Jetstream firehose streaming sub-second corporate mentions & breaking social intelligence.',
         category: 'Social Wire',
         intervalSec: 0,
-        tags: ['AT Protocol', 'Social Intelligence', 'Disabled', 'CDN Blocked'],
+        tags: ['AT Protocol', 'WebSocket Firehose', 'Sub-Second Stream', 'Real-time'],
         icon: Share2,
-        iconTheme: 'bg-slate-50 text-slate-400 border-slate-200',
-        status: 'Disabled',
-        provider: 'Bluesky Network',
-        apiSourceMatch: ['bluesky', 'bluesky social']
+        iconTheme: 'bg-sky-50 text-sky-600 border-sky-100',
+        status: 'Operational',
+        provider: 'Bluesky Jetstream (US-East)',
+        apiSourceMatch: ['bluesky', 'bluesky social', 'bluesky jetstream']
       },
       {
         id: 'googlenews',

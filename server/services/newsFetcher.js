@@ -1016,10 +1016,10 @@ export async function fetchMultiSourceNews(processIngestCallback) {
   console.log('   5. The Guardian   (Every cycle | since-cursor from-date)');
   console.log('   6. Publisher RSS  (Every cycle | GUID pre-filter + entity filter)');
   console.log('   7. GDELT DOC 2.0  (Every cycle | TLS-bypass Agent | 25s timeout)');
-  console.log('   [Bluesky: Disabled — CDN-blocked IN region, Not Configured]');
+  console.log('   8. Bluesky        (Real-time Jetstream WebSocket firehose | sub-second)');
   console.log('=========================================================================');
 
-  // Execute 7 active sources concurrently (Bluesky disabled — CDN-blocked)
+  // Execute active sources concurrently
   const results = await Promise.allSettled([
     fetchNewsApi(),
     fetchCurrentsNews(),

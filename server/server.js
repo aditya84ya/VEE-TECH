@@ -1170,12 +1170,21 @@ app.get('/api/sources', (_req, res) => {
     },
     {
       id: 'bluesky',
-      name: 'Bluesky Social Wire (AT Protocol Trial)',
+      name: 'Bluesky Jetstream Firehose (AT Protocol)',
       type: 'AT Protocol',
       configured: true,
-      provider: 'Bluesky Network',
+      provider: 'Bluesky Jetstream',
       category: 'Social Wire',
-      intervalSec: 45
+      intervalSec: 0
+    },
+    {
+      id: 'google_cse',
+      name: 'Google Programmable Search Engine (CSE)',
+      type: 'REST API',
+      configured: true,
+      provider: 'Google Custom Search Engine',
+      category: 'Discovery',
+      intervalSec: 0
     },
     {
       id: 'gnews',
