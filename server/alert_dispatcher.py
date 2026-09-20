@@ -298,26 +298,11 @@ def _find_tg_ringer_binary(vee_tech_root: Path) -> Optional[str]:
     return None
 
 
-import threading
-
-def _run_tg_call_sync(cmd: List[str], log_path: Path) -> None:
-    """Execute tg-ringer call synchronously in worker thread and log output."""
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            res = subprocess.run(cmd, stdout=f, stderr=f, text=True)
-            if res.returncode == 0:
-                print("call : done")
-            else:
-                print(f"[✗] tg-ringer call exited with code {res.returncode}")
-    except Exception as e:
-        print(f"[✗] tg-ringer exception: {e}")
-
-
 def trigger_tg_call(seconds: Optional[int] = None) -> Dict[str, Any]:
     """
     Trigger Telegram audio ring via `tg-ringer call {target} --seconds {seconds}`.
-    Runs for the full duration (default 30s from .env) in a non-daemon worker thread
-    so the phone rings continuously without being cut off early.
+    Runs as a completely detached background process on Windows so it continues
+    ringing for the full duration after Python exits.
     Logs output directly to tg_ringer.log.
     """
     if seconds is None:
@@ -353,12 +338,19 @@ def trigger_tg_call(seconds: Optional[int] = None) -> Dict[str, Any]:
     log_path = vee_tech_root / "tg_ringer.log"
 
     try:
-        t = threading.Thread(
-            target=_run_tg_call_sync,
-            args=(cmd, log_path),
-            daemon=False,
+        log_file = open(log_path, "a", encoding="utf-8")
+        kwargs = {}
+        # Completely detach the process on Windows so it continues ringing after Python exits
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+        subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=log_file,
+            **kwargs
         )
-        t.start()
+        print("call : done")
         return {"channel": "call", "status": "SUCCESS"}
     except Exception as e:
         print(f"[✗] TG-Ringer Failed: {e}")
