@@ -15,6 +15,7 @@ import { BlueskyJetstreamAdapter } from './providers/BlueskyJetstreamAdapter.js'
 import { BseAnnouncementsAdapter } from './providers/BseAnnouncementsAdapter.js';
 import { NewsSitemapAdapter } from './providers/NewsSitemapAdapter.js';
 import { GDELTAdapter } from './providers/GDELTAdapter.js';
+import { GoogleSearchFeedAdapter } from './providers/GoogleSearchFeedAdapter.js';
 import { validateEntityContext } from '../mediaMetrics.js';
 import { logTraceEvent, STAGES } from './TraceLogger.js';
 
@@ -64,7 +65,8 @@ export class IngestionGateway {
       new CurrentsAdapter(),
       new GNewsAdapter(),
       new EventRegistryAdapter(),
-      new GDELTAdapter()
+      new GDELTAdapter(),
+      new GoogleSearchFeedAdapter()
     ];
 
     this.maxArticleAgeHours = options.maxArticleAgeHours || 12;

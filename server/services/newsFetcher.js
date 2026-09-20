@@ -988,6 +988,52 @@ export async function fetchBlueskyFeed() {
 // Backwards-compatibility alias
 export const fetchBlueskySocial = fetchBlueskyFeed;
 
+/**
+ * 9. Google Programmable Search Engine (CSE) News Wire
+ */
+export async function fetchGoogleSearchNews() {
+  const apiKey = (process.env.GOOGLE_CUSTOM_SEARCH_KEY || '').trim();
+  const cxId = (process.env.GOOGLE_CX_ID || 'c7b914ef13847465b').trim();
+
+  if (!apiKey) {
+    return [];
+  }
+
+  const query = 'Infosys OR TCS OR Wipro OR Accenture crisis OR breach OR revenue OR regulatory';
+  try {
+    const res = await axios.get('https://www.googleapis.com/customsearch/v1', {
+      params: {
+        key: apiKey,
+        cx: cxId,
+        q: query,
+        num: 10,
+        dateRestrict: 'd3'
+      },
+      timeout: 8000,
+      headers: {
+        'User-Agent': 'VeeAlert/1.0 (Google CSE)',
+        Accept: 'application/json'
+      }
+    });
+
+    if (res.data?.items && Array.isArray(res.data.items)) {
+      return res.data.items.map((item) => ({
+        api_source: 'Google Search Engine (CSE)',
+        source_name: item.displayLink || 'Google Custom Search',
+        title: item.title,
+        url: item.link,
+        image_url: item.pagemap?.cse_image?.[0]?.src || item.pagemap?.metatags?.[0]?.['og:image'] || null,
+        raw_content: item.snippet || item.title,
+        published_at: item.pagemap?.metatags?.[0]?.['article:published_time'] || new Date().toISOString()
+      }));
+    }
+    return [];
+  } catch (err) {
+    console.warn(`[Google CSE] ⚠️ Request notice: ${err.response?.data?.error?.message || err.message}`);
+    return [];
+  }
+}
+
 // ============================================================================
 // 10. MASTER CONCURRENT MULTI-SOURCE AGGREGATOR (REST APIs + Verified RSS + Bluesky Trial)
 // ============================================================================
@@ -1008,7 +1054,7 @@ export async function fetchMultiSourceNews(processIngestCallback) {
 
   const cycleTime = new Date().toLocaleTimeString('en-IN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   console.log('\n================== [INGESTION CYCLE: ' + cycleTime + '] ==================');
-  console.log('⚡ [Multi-Source Engine] Commencing Concurrent 7-Source Ingestion:');
+  console.log('⚡ [Multi-Source Engine] Commencing Concurrent Multi-Source Ingestion:');
   console.log('   1. NewsAPI        (15min slow-poll | since-cursor | 100 req/day quota)');
   console.log('   2. Currents API   (Every cycle | since-cursor start_date)');
   console.log('   3. GNews          (15min slow-poll | since-cursor from | 100 req/day quota)');
@@ -1017,6 +1063,7 @@ export async function fetchMultiSourceNews(processIngestCallback) {
   console.log('   6. Publisher RSS  (Every cycle | GUID pre-filter + entity filter)');
   console.log('   7. GDELT DOC 2.0  (Every cycle | TLS-bypass Agent | 25s timeout)');
   console.log('   8. Bluesky        (Real-time Jetstream WebSocket firehose | sub-second)');
+  console.log('   9. Google CSE     (15min slow-poll | cx: c7b914ef13847465b)');
   console.log('=========================================================================');
 
   // Execute active sources concurrently
@@ -1027,7 +1074,8 @@ export async function fetchMultiSourceNews(processIngestCallback) {
     fetchNewsData(),
     fetchGuardianNews(),
     fetchPublisherRss(),
-    fetchGdeltDoc()
+    fetchGdeltDoc(),
+    fetchGoogleSearchNews()
   ]);
 
   const rawAggregatedArticles = [];
@@ -1038,7 +1086,8 @@ export async function fetchMultiSourceNews(processIngestCallback) {
     NewsData: 0,
     'The Guardian API': 0,
     'Publisher RSS': 0,
-    'GDELT DOC 2.0': 0
+    'GDELT DOC 2.0': 0,
+    'Google Search Engine (CSE)': 0
   };
 
   const sourceNames = [
@@ -1048,7 +1097,8 @@ export async function fetchMultiSourceNews(processIngestCallback) {
     'NewsData',
     'The Guardian API',
     'Publisher RSS',
-    'GDELT DOC 2.0'
+    'GDELT DOC 2.0',
+    'Google Search Engine (CSE)'
   ];
 
   results.forEach((result, idx) => {
