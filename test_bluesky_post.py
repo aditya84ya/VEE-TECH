@@ -2,13 +2,18 @@
 Helper script to publish unique critical test posts directly to Bluesky using credentials in .env.
 
 Usage:
-  python test_bluesky_post.py       -> Picks a fresh scenario automatically
-  python test_bluesky_post.py 1     -> Ransomware & Critical Cyber Breach
-  python test_bluesky_post.py 2     -> US SEC & DOJ Criminal Indictment
-  python test_bluesky_post.py 3     -> RBI Banking Suspension & Capital Asset Freeze
-  python test_bluesky_post.py 4     -> Global Banking Consortium Blacklist
-  python test_bluesky_post.py 5     -> ED Headquarters Raid & Leadership Custody
-  python test_bluesky_post.py "..." -> Custom text
+  python test_bluesky_post.py        -> Picks a fresh scenario automatically
+  python test_bluesky_post.py 1      -> Ransomware & Critical Cyber Breach
+  python test_bluesky_post.py 2      -> US SEC & DOJ Criminal Indictment
+  python test_bluesky_post.py 3      -> RBI Banking Suspension & Asset Freeze
+  python test_bluesky_post.py 4      -> Global Banking Consortium Blacklist
+  python test_bluesky_post.py 5      -> ED Headquarters Raid & Leadership Custody
+  python test_bluesky_post.py 6      -> SEBI Insider Trading & Boardroom Freeze
+  python test_bluesky_post.py 7      -> DHS & EDA Defense Contractor Blacklist
+  python test_bluesky_post.py 8      -> Global Cloud Data Center Fire Disaster
+  python test_bluesky_post.py 9      -> EU GDPR €1.2B Fine & Data Freeze
+  python test_bluesky_post.py 10     -> S&P & Moody's Downgrade to Junk (CCC-)
+  python test_bluesky_post.py "..."  -> Custom crisis text
 """
 
 import os
@@ -66,6 +71,28 @@ CRITICAL_SCENARIOS = {
         "BREAKING NEWS: Enforcement Directorate and CBI raid Infosys headquarters in Bengaluru, "
         "placing top executive leadership in immediate judicial detention following forensic evidence of illicit "
         "fund routing."
+    ),
+    "6": (
+        "BREAKING SEBI SANCTION: SEBI orders immediate 6-month nationwide stock market trading ban for "
+        "Infosys and attaches bank accounts of executive board members over massive insider trading and revenue "
+        "manipulation investigation."
+    ),
+    "7": (
+        "CRISIS ALERT: US Department of Homeland Security and European Defense Agency issue mandatory directive "
+        "ordering immediate termination and blacklisting of all Infosys government and defense contractor networks "
+        "citing compromised backdoors."
+    ),
+    "8": (
+        "FLASH DISASTER: Catastrophic physical fire and backup power failure at Infosys primary global "
+        "cloud facility in Pune causes total loss of unbacked client production data across 40 Fortune 500 enterprises."
+    ),
+    "9": (
+        "REGULATORY EMERGENCY: European Data Protection Board levies record €1.2 Billion emergency fine and "
+        "orders complete cessation of EU-India data processing agreements for Infosys following massive biometric data breach."
+    ),
+    "10": (
+        "FINANCIAL COLLAPSE ALERT: S&P and Moody's simultaneously slash Infosys corporate credit ratings by "
+        "five notches to junk (CCC-) citing catastrophic debt default risk and ongoing international regulatory freezes."
     ),
 }
 
