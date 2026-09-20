@@ -1267,10 +1267,10 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                 <div className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-amber-500" />
                   <span className="text-[10px] font-bold text-slate-800 uppercase tracking-wide">
-                    Polled & Aggregated
+                    Push Stream
                   </span>
                   <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">
-                    (RSS / APIs)
+                    (Bluesky Jetstream [RSS / APIs])
                   </span>
                 </div>
                 <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200 font-mono">
