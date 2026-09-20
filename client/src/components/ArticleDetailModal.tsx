@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   X, 
   Newspaper, 
@@ -10,9 +10,11 @@ import {
   Building2,
   Zap,
   Flame,
-  AlertTriangle
+  AlertTriangle,
+  Search
 } from 'lucide-react';
 import { IntelligenceItem } from '../types';
+import { GoogleSearchModal } from './GoogleSearchModal';
 
 interface ArticleDetailModalProps {
   article: IntelligenceItem | null;
@@ -25,6 +27,7 @@ export const ArticleDetailModal: React.FC<ArticleDetailModalProps> = ({
   onClose,
   onOpenVoiceCall
 }) => {
+  const [isVerifyOpen, setIsVerifyOpen] = useState(false);
   if (!article) return null;
 
   return (
@@ -163,6 +166,15 @@ export const ArticleDetailModal: React.FC<ArticleDetailModalProps> = ({
           </a>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsVerifyOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 text-xs font-semibold transition cursor-pointer"
+              title="Corroborate threat across Google Custom Search Engine"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Verify Threat (Google CSE)</span>
+            </button>
+
             {article.riskLevel === 'Critical' && (
               <button
                 onClick={() => {
@@ -183,6 +195,12 @@ export const ArticleDetailModal: React.FC<ArticleDetailModalProps> = ({
           </div>
         </div>
       </div>
+
+      <GoogleSearchModal
+        isOpen={isVerifyOpen}
+        onClose={() => setIsVerifyOpen(false)}
+        initialQuery={`${article.entity || ''} ${article.metadata.headline || ''}`}
+      />
     </div>
   );
 };

@@ -1,9 +1,10 @@
-import React from 'react';
-import { X, ExternalLink, PhoneCall, Check, Clock, Newspaper, ShieldAlert } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, ExternalLink, PhoneCall, Check, Clock, Newspaper, ShieldAlert, Search } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { Article } from '../hooks/useWarRoom';
 import { DetectionLatencyBadge } from './DetectionLatencyBadge';
 import { ArticleLifecycleTimeline } from './ArticleLifecycleTimeline';
+import { GoogleSearchModal } from './GoogleSearchModal';
 
 interface ArticleModalProps {
   article: Article | null;
@@ -18,6 +19,7 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
   onAcknowledge,
   onEscalateVoice
 }) => {
+  const [isVerifyOpen, setIsVerifyOpen] = useState(false);
   if (!article) return null;
 
   const isCritical = article.risk_level === 'Critical';
@@ -171,6 +173,15 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsVerifyOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-all cursor-pointer"
+              title="Corroborate article against Google Custom Search Engine"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Verify Threat (Google CSE)</span>
+            </button>
+
             {!isAcknowledged ? (
               <button
                 onClick={() => {
@@ -201,6 +212,12 @@ export const ArticleModal: React.FC<ArticleModalProps> = ({
           </div>
         </div>
       </div>
+
+      <GoogleSearchModal
+        isOpen={isVerifyOpen}
+        onClose={() => setIsVerifyOpen(false)}
+        initialQuery={`${article.entity_mentioned || ''} ${article.title || ''}`}
+      />
     </div>
   );
 };

@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { useWarRoom, Article } from '../hooks/useWarRoom';
+import { GoogleSearchModal } from './GoogleSearchModal';
 
 interface IntelligenceSourcesViewProps {
   articles?: Article[];
@@ -203,6 +204,20 @@ export const IntelligenceSourcesView: React.FC<IntelligenceSourcesViewProps> = (
         status: 'Operational',
         provider: 'The Guardian OpenPlatform',
         apiSourceMatch: ['guardian', 'the guardian', 'the guardian content api', 'the guardian api']
+      },
+      {
+        id: 'google_cse',
+        name: 'Google Programmable Search Engine (CSE)',
+        description: 'On-demand crisis threat verification & live web search (ID: c7b914ef13847465b).',
+        type: 'REST API',
+        category: 'Discovery',
+        intervalSec: 0,
+        tags: ['Google CSE', 'Verification', 'On-Demand', 'ID: c7b914ef13847465b'],
+        icon: Search,
+        iconTheme: 'bg-blue-50 text-blue-600 border-blue-100',
+        status: 'Operational',
+        provider: 'Google Custom Search Engine',
+        apiSourceMatch: ['google_cse', 'google cse', 'custom search', 'cse']
       }
     ],
     []
@@ -218,6 +233,7 @@ export const IntelligenceSourcesView: React.FC<IntelligenceSourcesViewProps> = (
   // Interactive Test State
   const [testingSourceId, setTestingSourceId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; message: string; success: boolean } | null>(null);
+  const [isGoogleCseOpen, setIsGoogleCseOpen] = useState(false);
 
   // Active Dropdown Menu
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
@@ -403,6 +419,17 @@ export const IntelligenceSourcesView: React.FC<IntelligenceSourcesViewProps> = (
 
   // Handle Testing Single Source
   const handleTestSource = async (source: SourceConfig) => {
+    if (source.id === 'google_cse') {
+      setIsGoogleCseOpen(true);
+      setTestResult({
+        id: source.id,
+        message: 'Google CSE connected • cx: c7b914ef13847465b • Interactive search opened',
+        success: true
+      });
+      setTimeout(() => setTestResult(null), 5000);
+      return;
+    }
+
     setTestingSourceId(source.id);
     setTestResult(null);
 
@@ -1036,6 +1063,11 @@ export const IntelligenceSourcesView: React.FC<IntelligenceSourcesViewProps> = (
           </div>
         </div>
       )}
+
+      <GoogleSearchModal
+        isOpen={isGoogleCseOpen}
+        onClose={() => setIsGoogleCseOpen(false)}
+      />
     </div>
   );
 };

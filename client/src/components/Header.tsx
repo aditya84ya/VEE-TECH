@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Sun, RefreshCw, Radio } from 'lucide-react';
+import { Search, Sun, RefreshCw, Radio, Globe } from 'lucide-react';
+import { GoogleSearchModal } from './GoogleSearchModal';
 
 interface HeaderProps {
   onFetchLiveNews?: () => void;
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
     time: '10:24 AM'
   });
 
+  const [isGoogleCseOpen, setIsGoogleCseOpen] = useState(false);
   const isLoading = Boolean(isFetchingLive ?? isSimulating);
   const handleFetch = onFetchLiveNews || onSimulateCrisis;
 
@@ -66,25 +68,36 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Compact Mobile Fetch Live News Button */}
-        <button
-          onClick={handleFetch}
-          disabled={isLoading}
-          title="Scrape and triage authentic real-world news right now"
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
-        >
-          {isLoading ? (
-            <>
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              <span>Fetching...</span>
-            </>
-          ) : (
-            <>
-              <Radio className="w-3.5 h-3.5" />
-              <span>Fetch Live</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsGoogleCseOpen(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold"
+            title="Google Programmable Search Engine"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>CSE</span>
+          </button>
+
+          {/* Compact Mobile Fetch Live News Button */}
+          <button
+            onClick={handleFetch}
+            disabled={isLoading}
+            title="Scrape and triage authentic real-world news right now"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          >
+            {isLoading ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Fetching...</span>
+              </>
+            ) : (
+              <>
+                <Radio className="w-3.5 h-3.5" />
+                <span>Fetch Live</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Global Search Bar (Full width on mobile, max-w-xl on desktop) */}
@@ -96,11 +109,16 @@ export const Header: React.FC<HeaderProps> = ({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search events, companies, sources, reports..."
-            className="w-full h-9 md:h-10 pl-9 md:pl-10 pr-4 md:pr-16 bg-white border border-slate-200 rounded-lg text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all shadow-xs"
+            className="w-full h-9 md:h-10 pl-9 md:pl-10 pr-20 md:pr-24 bg-white border border-slate-200 rounded-lg text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all shadow-xs"
           />
-          <kbd className="hidden md:inline-block absolute right-3 px-1.5 py-0.5 text-[11px] font-medium text-slate-400 bg-slate-100 border border-slate-200 rounded shadow-2xs pointer-events-none">
-            Ctrl K
-          </kbd>
+          <button
+            onClick={() => setIsGoogleCseOpen(true)}
+            className="absolute right-2 px-2 py-1 text-[11px] font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded flex items-center gap-1 transition-colors cursor-pointer"
+            title="Search with Google Programmable Search Engine"
+          >
+            <Globe className="w-3 h-3" />
+            <span className="hidden sm:inline">Google CSE</span>
+          </button>
         </div>
       </div>
 
@@ -140,6 +158,12 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </button>
       </div>
+
+      <GoogleSearchModal
+        isOpen={isGoogleCseOpen}
+        onClose={() => setIsGoogleCseOpen(false)}
+        initialQuery={searchQuery}
+      />
     </header>
   );
 };
