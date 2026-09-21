@@ -73,8 +73,8 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 
 export const supabase = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { persistSession: false }
-    })
+    auth: { persistSession: false }
+  })
   : null;
 
 // ============================================================================
@@ -295,8 +295,8 @@ export const ingestionGateway = new IngestionGateway({
     // When Ollama finishes triage and generates 5-bullet summary + score >= 9.0 / CRITICAL,
     // trigger the multi-channel emergency alert dispatcher immediately!
     const isCritical = (Number(updated.risk_score) >= 9.0) ||
-                       (String(updated.risk_level || '').toUpperCase() === 'CRITICAL') ||
-                       (String(updated.severity || '').toUpperCase() === 'CRITICAL');
+      (String(updated.risk_level || '').toUpperCase() === 'CRITICAL') ||
+      (String(updated.severity || '').toUpperCase() === 'CRITICAL');
     if (isCritical) {
       dispatchCriticalAlert(updated);
     }
@@ -374,12 +374,12 @@ export function calculateStringSimilarity(str1, str2) {
   const s2 = (str2 || '').toLowerCase().trim();
   if (s1 === s2) return 1.0;
   if (!s1 || !s2) return 0.0;
-  
+
   const words1 = s1.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
   const words2 = s2.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
   const set1 = new Set(words1);
   const set2 = new Set(words2);
-  
+
   const intersection = new Set([...set1].filter(x => set2.has(x)));
   const union = new Set([...set1, ...set2]);
   if (union.size === 0) return 0.0;
@@ -583,7 +583,7 @@ async function executeOllamaTriage(rawContent, title = '', sourceName = '') {
  */
 function deterministicFallbackTriage(content, title) {
   const text = `${title} ${content}`.toLowerCase();
-  
+
   let entity = 'Infosys';
   if (text.includes('tcs') || text.includes('tata consultancy')) entity = 'TCS';
   else if (text.includes('wipro')) entity = 'Wipro';
@@ -607,8 +607,8 @@ function deterministicFallbackTriage(content, title) {
   const sentiment = (riskLevel === 'Critical' || (isClient && riskLevel === 'High'))
     ? 'Negative'
     : (!isClient && riskLevel === 'High')
-    ? 'Positive'
-    : 'Neutral';
+      ? 'Positive'
+      : 'Neutral';
 
   return normalizeTriage({
     entity,
@@ -618,10 +618,10 @@ function deterministicFallbackTriage(content, title) {
     theme: isCritical
       ? 'Regulatory & Legal Crisis'
       : isHigh
-      ? 'Operational & Market Disruption'
-      : threat.risk_level === 'Low'
-      ? 'Strategic Product Innovation'
-      : 'Enterprise Intelligence',
+        ? 'Operational & Market Disruption'
+        : threat.risk_level === 'Low'
+          ? 'Strategic Product Innovation'
+          : 'Enterprise Intelligence',
     risk_score: riskScore,
     risk_level: riskLevel,
     requires_voice_escalation: isClient && isCritical,
@@ -657,7 +657,7 @@ async function insertArticleRecord(articlePayload) {
   // ── Latency Audit: split total gap into upstream lag vs our polling lag ──
   const now = new Date();
   const publishedAt = data.published_at ? new Date(data.published_at) : null;
-  const ingestedAt  = data.ingested_at  ? new Date(data.ingested_at)  : now;
+  const ingestedAt = data.ingested_at ? new Date(data.ingested_at) : now;
   const totalLagMin = publishedAt ? Math.round((ingestedAt - publishedAt) / 60000) : null;
   // Our polling lag = time from ingested_at stamp to now (how long it sat in pipeline before DB write)
   const ourPipelineLagSec = Math.round((now - ingestedAt) / 1000);
@@ -1589,7 +1589,7 @@ app.get('/api/articles', async (_req, res) => {
 
     // Enrich rows to satisfy the full Frontend Data Contract (Section 44)
     const enriched = rows.map((art) => {
-      const cluster = ingestionGateway?.deduplicator?.storyClusters ? 
+      const cluster = ingestionGateway?.deduplicator?.storyClusters ?
         Array.from(ingestionGateway.deduplicator.storyClusters.values()).find(c => c.articles.includes(art.id)) : null;
 
       return {
@@ -1681,7 +1681,7 @@ async function triggerInstagramManualPass() {
     if (match) {
       try {
         return JSON.parse(match[1]);
-      } catch (e) {}
+      } catch (e) { }
     }
     return { provider: 'instagram', status: 'COMPLETED', success: true };
   } catch (err) {
@@ -1819,16 +1819,16 @@ app.post('/api/ocr/ingest-test', async (req, res) => {
       success: true,
       imageUrl,
       article: {
-        title:          result.title,
-        provider:       result.provider,
-        publisher:      result.publisher,
-        ocrConfidence:  result.ocrConfidence,
-        ocrDurationMs:  result.ocrDurationMs,
+        title: result.title,
+        provider: result.provider,
+        publisher: result.publisher,
+        ocrConfidence: result.ocrConfidence,
+        ocrDurationMs: result.ocrDurationMs,
         isLowConfidence: result.isLowConfidence,
-        matchedTarget:  result.matchedTarget,
-        contentLength:  result.content?.length || 0,
-        publishedAt:    result.publishedAt,
-        url:            result.url
+        matchedTarget: result.matchedTarget,
+        contentLength: result.content?.length || 0,
+        publishedAt: result.publishedAt,
+        url: result.url
       },
       message: `✅ OCR article emitted for "${result.matchedTarget}" (Confidence: ${result.ocrConfidence?.toFixed(0)}%)`
     });
@@ -2006,16 +2006,16 @@ app.post('/api/manual-upload', uploadMemory.single('file'), async (req, res) => 
     console.log(`[Manual Upload] Non-historical alert active: evaluating emergency notification rules...`);
     const { channels, requiresVoice } = evaluateAlertRules(triage);
     if (channels.includes('Slack')) {
-      sendSlackAlert(triage.five_bullet_summary, triage.risk_level, guessedTitle, triage.risk_score).catch(() => {});
+      sendSlackAlert(triage.five_bullet_summary, triage.risk_level, guessedTitle, triage.risk_score).catch(() => { });
     }
     if (channels.includes('WhatsApp')) {
-      sendWhatsAppAlert(triage.five_bullet_summary, guessedTitle, triage.risk_score).catch(() => {});
+      sendWhatsAppAlert(triage.five_bullet_summary, guessedTitle, triage.risk_score).catch(() => { });
     }
     if (channels.includes('Email')) {
-      sendEmailAlert(triage.five_bullet_summary, guessedTitle, triage.risk_score).catch(() => {});
+      sendEmailAlert(triage.five_bullet_summary, guessedTitle, triage.risk_score).catch(() => { });
     }
     if (requiresVoice || triage.requires_voice_escalation) {
-      triggerVoiceCall(triage.five_bullet_summary, guessedTitle).catch(() => {});
+      triggerVoiceCall(triage.five_bullet_summary, guessedTitle).catch(() => { });
     }
   } else {
     console.log(`[Manual Upload] Historical research mode active — skipping auto-dispatch to phone/Slack/WhatsApp.`);

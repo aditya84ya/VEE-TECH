@@ -968,44 +968,81 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                         />
                       </div>
 
-                      {/* Headline with interactive [Read more] / [Show less] toggle */}
+                      {/* Headline & Expandable Full Article Body */}
                       {(() => {
-                        const rawTitle = (article.title || '').trim();
-                        // If article.title was truncated at ingestion with '…' or '...' and full text is in content/raw_content, use the full text
-                        const fullTitle = (
-                          rawTitle.endsWith('…') || rawTitle.endsWith('...') || rawTitle.endsWith(' ...')
-                            ? (article.content && article.content.length > rawTitle.length
-                                ? article.content
-                                : article.raw_content && article.raw_content.length > rawTitle.length
-                                ? article.raw_content
-                                : article.description && article.description.length > rawTitle.length
-                                ? article.description
-                                : rawTitle)
-                            : rawTitle
-                        ).trim();
+                        const headline = (article.title || '').trim();
+                        // Find the longest article body available across raw_content, content, description
+                        const candidates = [
+                          (article.raw_content || '').trim(),
+                          (article.content || '').trim(),
+                          (article.description || '').trim()
+                        ];
+                        const fullBody = candidates.reduce((longest, curr) => curr.length > longest.length ? curr : longest, '');
 
                         const isExpanded = Boolean(expandedHeadlines[article.id]);
-                        const charLimit = 80;
-                        const isLong = fullTitle.length > charLimit;
-                        const displayTitle = isLong && !isExpanded ? `${fullTitle.substring(0, charLimit)}...` : fullTitle;
+                        const charLimit = 90;
+                        const isHeadlineLong = headline.length > charLimit;
 
+                        // Truncate headline cleanly at a word boundary when collapsed
+                        let collapsedHeadline = headline;
+                        if (isHeadlineLong) {
+                          const spaceIdx = headline.indexOf(' ', charLimit);
+                          const cutPoint = spaceIdx !== -1 && spaceIdx < charLimit + 15 ? spaceIdx : charLimit;
+                          collapsedHeadline = `${headline.substring(0, cutPoint)}…`;
+                        }
+
+                        // Has more content to reveal (either longer headline or full article body)
+                        const hasMore = isHeadlineLong || (fullBody.length > 0 && fullBody !== headline);
+
+                        if (!isExpanded) {
+                          return (
+                            <h3 className="font-bold text-[17px] text-black leading-snug break-words">
+                              <span>{collapsedHeadline}</span>
+                              {hasMore && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleHeadline(article.id);
+                                  }}
+                                  className="ml-1.5 inline-block text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer select-none"
+                                >
+                                  [Read more]
+                                </button>
+                              )}
+                            </h3>
+                          );
+                        }
+
+                        // Expanded view: Full headline + Full article body from first word to final full stop + [Show less]
                         return (
-                          <h3 className="font-bold text-[17px] text-black leading-snug break-words">
-                            <span>{displayTitle}</span>
+                          <div className="space-y-2.5">
+                            <h3 className="font-bold text-[17px] text-black leading-snug break-words">
+                              <span>{headline}</span>
+                            </h3>
 
-                            {isLong && (
+                            {fullBody && (
+                              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 text-[13px] text-slate-800 leading-relaxed whitespace-pre-wrap break-words font-normal">
+                                <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                                  Full Scanned Article Intelligence:
+                                </p>
+                                {fullBody}
+                              </div>
+                            )}
+
+                            <div>
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   toggleHeadline(article.id);
                                 }}
-                                className="ml-1.5 inline-block text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer"
+                                className="inline-block text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors cursor-pointer select-none"
                               >
-                                {isExpanded ? '[Show less]' : '[Read more]'}
+                                [Show less]
                               </button>
-                            )}
-                          </h3>
+                            </div>
+                          </div>
                         );
                       })()}
 
@@ -1024,16 +1061,22 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                         const hasPrefix = trimmed.toLowerCase().startsWith('what happened:');
                         const fullText = hasPrefix ? trimmed.substring('what happened:'.length).trim() : trimmed;
                         const isExpanded = Boolean(expandedSummaries[article.id]);
-                        const charLimit = 160;
+                        const charLimit = 90;
                         const isLong = fullText.length > charLimit;
-                        const displayText = isLong && !isExpanded ? `${fullText.substring(0, charLimit)}...` : fullText;
+
+                        let collapsedSummary = fullText;
+                        if (isLong) {
+                          const spaceIdx = fullText.indexOf(' ', charLimit);
+                          const cutPoint = spaceIdx !== -1 && spaceIdx < charLimit + 15 ? spaceIdx : charLimit;
+                          collapsedSummary = `${fullText.substring(0, cutPoint)}…`;
+                        }
+
+                        const displayText = isLong && !isExpanded ? collapsedSummary : fullText;
 
                         return (
-                          <div className="mt-1 text-[13px]">
-                            <p className="inline leading-relaxed text-black dark:text-black font-normal">
-                              <span className="font-semibold text-black dark:text-black">What happened: </span>
-                              {displayText}
-                            </p>
+                          <div className="mt-1 text-[13px] leading-relaxed text-black dark:text-black font-normal break-words">
+                            <span className="font-semibold text-black dark:text-black">What happened: </span>
+                            <span>{displayText}</span>
                             {isLong && (
                               <button
                                 type="button"
@@ -1041,7 +1084,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                                   e.stopPropagation();
                                   toggleSummary(article.id);
                                 }}
-                                className="ml-1.5 inline font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors cursor-pointer"
+                                className="ml-1.5 inline font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors cursor-pointer select-none"
                               >
                                 {isExpanded ? '[Show less]' : '[Read more]'}
                               </button>
@@ -1086,16 +1129,28 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                             <h4 className="font-mono font-bold uppercase tracking-wider text-slate-500 text-[10px]">
                               EXECUTIVE 5-BULLET INTELLIGENCE BRIEF:
                             </h4>
-                            <ul className="space-y-1 text-slate-700 list-disc list-inside marker:text-rose-500 leading-relaxed">
+                            <ul className="space-y-2 text-slate-700 list-disc list-inside marker:text-rose-500 leading-relaxed text-xs">
                               {Array.isArray(article.five_bullet_summary) &&
                                 article.five_bullet_summary.length > 0 ? (
-                                article.five_bullet_summary.map((b, i) => (
-                                  <li key={i} className="pl-0.5">
-                                    <span>{b}</span>
-                                  </li>
-                                ))
+                                article.five_bullet_summary.map((b, i) => {
+                                  const bulletStr = String(b || '').trim();
+                                  const colonIndex = bulletStr.indexOf(':');
+                                  if (colonIndex > 0 && colonIndex < 35) {
+                                    return (
+                                      <li key={i} className="pl-0.5 leading-relaxed break-words">
+                                        <span className="font-semibold text-slate-900">{bulletStr.substring(0, colonIndex + 1)}</span>
+                                        <span>{bulletStr.substring(colonIndex + 1)}</span>
+                                      </li>
+                                    );
+                                  }
+                                  return (
+                                    <li key={i} className="pl-0.5 leading-relaxed break-words">
+                                      <span>{bulletStr}</span>
+                                    </li>
+                                  );
+                                })
                               ) : (
-                                <li>Real-time event recorded into central memory store.</li>
+                                <li className="leading-relaxed">Real-time event recorded into central memory store.</li>
                               )}
                             </ul>
 

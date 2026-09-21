@@ -244,13 +244,14 @@ export class AiTriageQueue extends EventEmitter {
       '  "risk_level": "Low" | "Medium" | "High" | "Critical",',
       '  "requires_voice_escalation": <boolean>,',
       '  "five_bullet_summary": [',
-      '    "What happened: [1 clear sentence]",',
-      '    "Why it matters: [1 clear sentence explaining direct business impact]",',
-      '    "Risk score rationale: [1 sentence justifying the assigned risk level]",',
-      '    "Competitor impact: [1 sentence on what this means for other IT firms]",',
-      '    "Recommended action: [1 concrete immediate response for leadership]"',
+      '    "What happened: [1-2 complete sentences explaining the event thoroughly]",',
+      '    "Why it matters: [1-2 complete sentences explaining direct strategic, financial, and operational impact]",',
+      '    "Risk score rationale: [1-2 complete sentences justifying the assigned risk level and threat severity]",',
+      '    "Competitor impact: [1-2 complete sentences on implications for rival vendors like TCS, Wipro, Accenture]",',
+      '    "Recommended action: [1-2 complete sentences with concrete immediate steps for leadership]"',
       '  ]',
       '}',
+      'CRITICAL: Provide full, complete sentences for every bullet. NEVER cut off text mid-sentence or truncate with an ellipsis (...). Output valid JSON only.',
       '',
       `Source: ${sourceName}`,
       `Headline: ${title}`,
@@ -265,7 +266,7 @@ export class AiTriageQueue extends EventEmitter {
           prompt,
           format: 'json',
           stream: false,
-          options: { temperature: 0.1, num_predict: 512 }
+          options: { temperature: 0.1, num_predict: 800 }
         },
         { timeout: 35000 }
       );

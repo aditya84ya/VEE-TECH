@@ -270,7 +270,7 @@ export const ManualUploadView: React.FC = () => {
         // Immediately trigger global articles refresh so other views update
         try {
           fetchArticles(false);
-        } catch (_) {}
+        } catch (_) { }
       } else {
         setStage('error');
         setErrorMessage(response.data?.error || 'Failed to process document');
@@ -350,13 +350,12 @@ export const ManualUploadView: React.FC = () => {
               onDragOver={handleDrag}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all cursor-pointer select-none ${
-                dragActive
+              className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all cursor-pointer select-none ${dragActive
                   ? 'border-purple-500 bg-purple-50/50'
                   : selectedFile
-                  ? 'border-emerald-300 bg-emerald-50/30'
-                  : 'border-slate-300 hover:border-purple-400 bg-slate-50/50 hover:bg-purple-50/20'
-              }`}
+                    ? 'border-emerald-300 bg-emerald-50/30'
+                    : 'border-slate-300 hover:border-purple-400 bg-slate-50/50 hover:bg-purple-50/20'
+                }`}
             >
               <input
                 ref={fileInputRef}
@@ -527,16 +526,14 @@ export const ManualUploadView: React.FC = () => {
             {/* Error / Guardrail Message Alert */}
             {errorMessage && (
               <div
-                className={`p-4 rounded-xl border flex items-start gap-3 text-xs animate-in fade-in ${
-                  errorMessage.toLowerCase().includes('no tracked company')
+                className={`p-4 rounded-xl border flex items-start gap-3 text-xs animate-in fade-in ${errorMessage.toLowerCase().includes('no tracked company')
                     ? 'bg-amber-50 border-amber-200 text-amber-900'
                     : 'bg-rose-50 border-rose-200 text-rose-800'
-                }`}
+                  }`}
               >
                 <AlertTriangle
-                  className={`w-4 h-4 shrink-0 mt-0.5 ${
-                    errorMessage.toLowerCase().includes('no tracked company') ? 'text-amber-600' : 'text-rose-600'
-                  }`}
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${errorMessage.toLowerCase().includes('no tracked company') ? 'text-amber-600' : 'text-rose-600'
+                    }`}
                 />
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -576,13 +573,12 @@ export const ManualUploadView: React.FC = () => {
                 <div className="grid grid-cols-4 gap-2 text-xs">
                   {/* Step 1 */}
                   <div
-                    className={`p-2.5 rounded-lg border text-center transition-colors ${
-                      stage === 'uploading'
+                    className={`p-2.5 rounded-lg border text-center transition-colors ${stage === 'uploading'
                         ? 'bg-purple-100 border-purple-300 text-purple-900 font-bold shadow-xs'
                         : stage === 'ocr' || stage === 'triage'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                        : 'bg-white border-slate-200 text-slate-400'
-                    }`}
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          : 'bg-white border-slate-200 text-slate-400'
+                      }`}
                   >
                     <div className="text-[10px] font-bold uppercase mb-0.5">Stage 1</div>
                     <div>Uploading...</div>
@@ -590,13 +586,12 @@ export const ManualUploadView: React.FC = () => {
 
                   {/* Step 2 */}
                   <div
-                    className={`p-2.5 rounded-lg border text-center transition-colors ${
-                      stage === 'ocr'
+                    className={`p-2.5 rounded-lg border text-center transition-colors ${stage === 'ocr'
                         ? 'bg-purple-100 border-purple-300 text-purple-900 font-bold shadow-xs'
                         : stage === 'triage'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                        : 'bg-white border-slate-200 text-slate-400'
-                    }`}
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          : 'bg-white border-slate-200 text-slate-400'
+                      }`}
                   >
                     <div className="text-[10px] font-bold uppercase mb-0.5">Stage 2</div>
                     <div>Extracting (OCR)...</div>
@@ -604,11 +599,10 @@ export const ManualUploadView: React.FC = () => {
 
                   {/* Step 3 */}
                   <div
-                    className={`p-2.5 rounded-lg border text-center transition-colors ${
-                      stage === 'triage'
+                    className={`p-2.5 rounded-lg border text-center transition-colors ${stage === 'triage'
                         ? 'bg-purple-100 border-purple-300 text-purple-900 font-bold shadow-xs'
                         : 'bg-white border-slate-200 text-slate-400'
-                    }`}
+                      }`}
                   >
                     <div className="text-[10px] font-bold uppercase mb-0.5">Stage 3</div>
                     <div>Analyzing (AI triage)...</div>
@@ -712,13 +706,12 @@ export const ManualUploadView: React.FC = () => {
                 {/* Risk Level Badge */}
                 <div className="flex items-center gap-2">
                   <span
-                    className={`px-3 py-1 rounded-lg text-xs font-bold font-mono tracking-wide border ${
-                      uploadResult.article.risk_level === 'Critical'
+                    className={`px-3 py-1 rounded-lg text-xs font-bold font-mono tracking-wide border ${uploadResult.article.risk_level === 'Critical'
                         ? 'bg-rose-50 text-rose-700 border-rose-200'
                         : uploadResult.article.risk_level === 'High'
-                        ? 'bg-amber-50 text-amber-700 border-amber-200'
-                        : 'bg-slate-100 text-slate-700 border-slate-200'
-                    }`}
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
                   >
                     {uploadResult.article.risk_level?.toUpperCase()} {uploadResult.article.risk_score?.toFixed(1)}/10
                   </span>
@@ -779,13 +772,24 @@ export const ManualUploadView: React.FC = () => {
                   <span>Executive 5-Bullet Brief</span>
                 </div>
 
-                <ul className="space-y-1.5 text-xs text-slate-700">
-                  {uploadResult.article.five_bullet_summary?.map((bullet, idx) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-purple-600 shrink-0 mt-1.5" />
-                      <span className="leading-relaxed">{bullet}</span>
-                    </li>
-                  ))}
+                <ul className="space-y-2 text-xs text-slate-700">
+                  {uploadResult.article.five_bullet_summary?.map((bullet, idx) => {
+                    const bulletStr = String(bullet || '').trim();
+                    const colonIndex = bulletStr.indexOf(':');
+                    return (
+                      <li key={idx} className="flex items-start gap-2 leading-relaxed break-words">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-600 shrink-0 mt-1.5" />
+                        {colonIndex > 0 && colonIndex < 35 ? (
+                          <span className="leading-relaxed text-slate-700">
+                            <strong className="text-slate-900 font-semibold">{bulletStr.substring(0, colonIndex + 1)}</strong>
+                            {bulletStr.substring(colonIndex + 1)}
+                          </span>
+                        ) : (
+                          <span className="leading-relaxed text-slate-700">{bulletStr}</span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
 

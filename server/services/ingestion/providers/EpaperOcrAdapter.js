@@ -62,7 +62,7 @@ const DEFAULT_SOURCES = [
   }
 ];
 
-const httpAgent  = new http.Agent({ keepAlive: true, maxSockets: 4 });
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 4 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 4 });
 
 function isValidImageBuffer(buf) {
@@ -79,7 +79,7 @@ function isValidImageBuffer(buf) {
   if (buf[0] === 0x42 && buf[1] === 0x4D) return true;
   // TIFF
   if ((buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2A && buf[3] === 0x00) ||
-      (buf[0] === 0x4D && buf[1] === 0x4D && buf[0] === 0x00 && buf[3] === 0x2A)) return true;
+    (buf[0] === 0x4D && buf[1] === 0x4D && buf[0] === 0x00 && buf[3] === 0x2A)) return true;
   return false;
 }
 
@@ -98,16 +98,16 @@ export class EpaperOcrAdapter extends ProviderAdapter {
   constructor(options = {}) {
     super({
       providerName: 'epaper_ocr',
-      displayName:  'E-Paper / Image OCR Ingestion',
-      fetchMode:    'POLL',
-      intervalMs:   options.intervalMs    || 5 * 60 * 1000,
-      priority:     3
+      displayName: 'E-Paper / Image OCR Ingestion',
+      fetchMode: 'POLL',
+      intervalMs: options.intervalMs || 5 * 60 * 1000,
+      priority: 3
     });
 
-    this.sources       = options.sources       || DEFAULT_SOURCES;
-    this.minConfidence = options.minConfidence  ?? MIN_CONFIDENCE;
-    this._cache        = new Map();
-    this._worker       = null;
+    this.sources = options.sources || DEFAULT_SOURCES;
+    this.minConfidence = options.minConfidence ?? MIN_CONFIDENCE;
+    this._cache = new Map();
+    this._worker = null;
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ export class EpaperOcrAdapter extends ProviderAdapter {
   async onStart() {
     console.log('[EpaperOCR] Initialising Tesseract.js worker (eng)...');
     try {
-      this._worker = await createWorker('eng', 1, { logger: () => {} });
+      this._worker = await createWorker('eng', 1, { logger: () => { } });
       console.log('[EpaperOCR] Tesseract worker ready.');
     } catch (err) {
       console.error('[EpaperOCR] Failed to init Tesseract worker:', err.message);
@@ -125,7 +125,7 @@ export class EpaperOcrAdapter extends ProviderAdapter {
 
   async onStop() {
     if (this._worker) {
-      try { await this._worker.terminate(); } catch (_) {}
+      try { await this._worker.terminate(); } catch (_) { }
       this._worker = null;
     }
     console.log('[EpaperOCR] Tesseract worker terminated.');
@@ -137,19 +137,23 @@ export class EpaperOcrAdapter extends ProviderAdapter {
     const traceId = opts.traceId || ('tr_epaper_' + Date.now());
 
     if (!this._worker) {
-      logTraceEvent({ stage: STAGES.HTTP_REQUEST_START, traceId, provider: 'epaper_ocr',
-        extra: { note: 'Tesseract worker not ready - skipping cycle' } });
+      logTraceEvent({
+        stage: STAGES.HTTP_REQUEST_START, traceId, provider: 'epaper_ocr',
+        extra: { note: 'Tesseract worker not ready - skipping cycle' }
+      });
       return { items: [], stats: { rawCount: 0, duplicateCount: 0, staleCount: 0 } };
     }
 
-    logTraceEvent({ stage: STAGES.HTTP_REQUEST_START, traceId, provider: 'epaper_ocr',
-      extra: { sourceCount: this.sources.length } });
+    logTraceEvent({
+      stage: STAGES.HTTP_REQUEST_START, traceId, provider: 'epaper_ocr',
+      extra: { sourceCount: this.sources.length }
+    });
 
-    const reqStart    = Date.now();
-    const freshItems  = [];
+    const reqStart = Date.now();
+    const freshItems = [];
     let totalAttempts = 0;
-    let skipCount     = 0;
-    let errorCount    = 0;
+    let skipCount = 0;
+    let errorCount = 0;
 
     for (const source of this.sources) {
       totalAttempts++;
@@ -167,8 +171,10 @@ export class EpaperOcrAdapter extends ProviderAdapter {
     }
 
     const durationMs = Date.now() - reqStart;
-    logTraceEvent({ stage: STAGES.HTTP_RESPONSE, traceId, provider: 'epaper_ocr',
-      durationMs, extra: { totalAttempts, fresh: freshItems.length, skipped: skipCount, errors: errorCount } });
+    logTraceEvent({
+      stage: STAGES.HTTP_RESPONSE, traceId, provider: 'epaper_ocr',
+      durationMs, extra: { totalAttempts, fresh: freshItems.length, skipped: skipCount, errors: errorCount }
+    });
 
     console.log('[EpaperOCR] sources=' + totalAttempts + ' accepted=' + freshItems.length +
       ' skipped=' + skipCount + ' errors=' + errorCount + ' durationMs=' + durationMs);
@@ -288,15 +294,15 @@ export class EpaperOcrAdapter extends ProviderAdapter {
 
     // OCR
     const ocrStart = Date.now();
-    let ocrText    = '';
+    let ocrText = '';
     let confidence = 0;
     try {
       const { data } = await this._worker.recognize(imageSource);
-      ocrText    = (data.text || '').trim();
+      ocrText = (data.text || '').trim();
       confidence = data.confidence ?? 0;
     } catch (ocrErr) {
       console.warn('[EpaperOCR] OCR failed: ' + ocrErr.message);
-      try { await this._worker.terminate(); } catch (_) {}
+      try { await this._worker.terminate(); } catch (_) { }
       this._worker = null;
       return null;
     }
@@ -350,20 +356,20 @@ export class EpaperOcrAdapter extends ProviderAdapter {
     const webLink = meta.sourceUrl || meta.postUrl || originalSourceUrl;
 
     return {
-      guid:          articleId,
+      guid: articleId,
       title,
-      link:          webLink,
-      sourceUrl:     webLink,
-      imageUrl:      originalSourceUrl,
-      mediaUrl:      originalSourceUrl,
-      pubDate:       meta.publishedAt || new Date().toISOString(),
+      link: webLink,
+      sourceUrl: webLink,
+      imageUrl: originalSourceUrl,
+      mediaUrl: originalSourceUrl,
+      pubDate: meta.publishedAt || new Date().toISOString(),
       ocrText,
       confidence,
-      sourceName:    meta.sourceName || 'E-Paper OCR',
+      sourceName: meta.sourceName || 'E-Paper OCR',
       ocrDurationMs: ocrMs,
       matchedTarget,
       threat,
-      page:          meta.page || 1,
+      page: meta.page || 1,
       isLowConfidence: confidence < 60,
       metadata: {
         original_media_url: originalSourceUrl,
@@ -375,8 +381,8 @@ export class EpaperOcrAdapter extends ProviderAdapter {
   async _ensureWorker() {
     if (!this._worker) {
       try {
-        this._worker = await createWorker('eng', 1, { logger: () => {} });
-      } catch (_) {}
+        this._worker = await createWorker('eng', 1, { logger: () => { } });
+      } catch (_) { }
     }
   }
 
@@ -387,29 +393,29 @@ export class EpaperOcrAdapter extends ProviderAdapter {
     const now = new Date().toISOString();
     return {
       providerArticleId: raw.guid,
-      provider:          'epaper_ocr',
-      publisher:         raw.sourceName || 'E-Paper OCR',
-      publisherDomain:   'epaper',
-      title:             raw.title,
-      url:               raw.link,
-      sourceUrl:         raw.link,
-      publisherUrl:      raw.link,
-      canonicalUrl:      raw.link,
-      description:       raw.ocrText ? raw.ocrText.slice(0, 500) : raw.title,
-      content:           raw.ocrText || raw.title,
-      image:             raw.imageUrl || raw.mediaUrl || null,
-      mediaUrl:          raw.mediaUrl || raw.imageUrl || null,
-      language:          'en',
-      country:           'IN',
-      publishedAt:          raw.pubDate || now,
-      providerAvailableAt:  null,
-      receivedAt:           now,
-      ingestedAt:           now,
+      provider: 'epaper_ocr',
+      publisher: raw.sourceName || 'E-Paper OCR',
+      publisherDomain: 'epaper',
+      title: raw.title,
+      url: raw.link,
+      sourceUrl: raw.link,
+      publisherUrl: raw.link,
+      canonicalUrl: raw.link,
+      description: raw.ocrText ? raw.ocrText.slice(0, 500) : raw.title,
+      content: raw.ocrText || raw.title,
+      image: raw.imageUrl || raw.mediaUrl || null,
+      mediaUrl: raw.mediaUrl || raw.imageUrl || null,
+      language: 'en',
+      country: 'IN',
+      publishedAt: raw.pubDate || now,
+      providerAvailableAt: null,
+      receivedAt: now,
+      ingestedAt: now,
       // OCR metadata -- passed through to the article payload for UI badge
-      ocrConfidence:    raw.confidence,
-      ocrDurationMs:    raw.ocrDurationMs,
-      isLowConfidence:  raw.isLowConfidence,
-      matchedTarget:    raw.matchedTarget,
+      ocrConfidence: raw.confidence,
+      ocrDurationMs: raw.ocrDurationMs,
+      isLowConfidence: raw.isLowConfidence,
+      matchedTarget: raw.matchedTarget,
       metadata: {
         original_media_url: raw.mediaUrl || raw.imageUrl || null,
         ocr_confidence: raw.confidence
