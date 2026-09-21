@@ -24,6 +24,7 @@ import crypto from 'node:crypto';
 import { ProviderAdapter } from '../ProviderAdapter.js';
 import { logTraceEvent, STAGES } from '../TraceLogger.js';
 import { evaluateThreatSeverity } from '../../threatScorer.js';
+import { preprocessImageForOcr } from '../../imagePreprocessor.js';
 
 // Try to load pdf-img-convert; degrade gracefully if canvas is missing
 let pdfImgConvert = null;
@@ -113,10 +114,11 @@ export class EpaperOcrAdapter extends ProviderAdapter {
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
   async onStart() {
-    console.log('[EpaperOCR] Initialising Tesseract.js worker (eng)...');
+    console.log('[EpaperOCR] Initialising Tesseract.js worker (eng, PSM 3)...');
     try {
       this._worker = await createWorker('eng', 1, { logger: () => { } });
-      console.log('[EpaperOCR] Tesseract worker ready.');
+      await this._worker.setParameters({ tessedit_pageseg_mode: 3 });
+      console.log('[EpaperOCR] Tesseract worker ready with PSM 3 (auto page segmentation).');
     } catch (err) {
       console.error('[EpaperOCR] Failed to init Tesseract worker:', err.message);
       this._worker = null;
@@ -382,6 +384,7 @@ export class EpaperOcrAdapter extends ProviderAdapter {
     if (!this._worker) {
       try {
         this._worker = await createWorker('eng', 1, { logger: () => { } });
+        await this._worker.setParameters({ tessedit_pageseg_mode: 3 });
       } catch (_) { }
     }
   }
@@ -429,10 +432,30 @@ export class EpaperOcrAdapter extends ProviderAdapter {
     if (!this._worker) {
       throw new Error('Tesseract OCR worker could not be initialized');
     }
-    const { data } = await this._worker.recognize(buffer);
+
+    let preprocessedBuffer = buffer;
+    let prepStats = null;
+    try {
+      const pre = await preprocessImageForOcr(buffer);
+      if (pre && pre.preprocessedBuffer) {
+        preprocessedBuffer = pre.preprocessedBuffer;
+        prepStats = { width: pre.width, height: pre.height };
+      }
+    } catch (prepErr) {
+      console.warn('[EpaperOCR] Preprocessing notice:', prepErr.message);
+    }
+
+    const { data } = await this._worker.recognize(preprocessedBuffer);
+    const confidence = Number((data?.confidence ?? 0).toFixed(1));
+    const text = (data?.text || '').trim();
+    const ocr_quality = confidence < 70 ? 'low' : 'high';
+
     return {
-      text: (data?.text || '').trim(),
-      confidence: data?.confidence ?? 0
+      text,
+      confidence,
+      ocr_quality,
+      isLowConfidence: confidence < 70,
+      preprocessed: Boolean(prepStats)
     };
   }
 

@@ -32,6 +32,13 @@ interface OcrUploadResult {
     extractedText: string;
     confidence: number;
     characterCount: number;
+    ocr_quality?: string;
+    ocr_engine?: string;
+    pub_date?: string | null;
+    author?: string | null;
+    page_no?: string | null;
+    info?: string | null;
+    summary?: string | null;
   };
   triage: {
     entity: string;
@@ -39,9 +46,11 @@ interface OcrUploadResult {
     risk_score: number;
     risk_level: string;
     five_bullet_summary: string[];
-    theme: string;
+    theme?: string;
   };
   historical: boolean;
+  unreadable?: boolean;
+  message?: string;
 }
 
 type Stage = 'idle' | 'uploading' | 'ocr' | 'triage' | 'completed' | 'error';
@@ -701,6 +710,24 @@ export const ManualUploadView: React.FC = () => {
                       OCR Confidence: {uploadResult.ocr.confidence.toFixed(1)}%
                     </span>
                   )}
+
+                  {/* Engine Badge */}
+                  <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] uppercase font-mono font-bold tracking-wider border border-slate-300">
+                    Engine: {uploadResult.article.ocr_engine === 'gemini' ? 'Gemini' : 'Tesseract + Ollama'}
+                  </span>
+
+                  {/* Low OCR Quality Warning Badge */}
+                  {(uploadResult.article.ocr_quality === 'low' ||
+                    uploadResult.ocr.ocr_quality === 'low' ||
+                    uploadResult.ocr.confidence < 70) && (
+                      <span
+                        title="OCR text extraction confidence is under 70%. Verify source text."
+                        className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] uppercase font-bold tracking-wider border border-amber-300 flex items-center gap-1 shadow-2xs"
+                      >
+                        <AlertTriangle className="w-3 h-3 text-amber-600" />
+                        <span>Low OCR quality: verify the source</span>
+                      </span>
+                    )}
                 </div>
 
                 {/* Risk Level Badge */}
@@ -722,7 +749,9 @@ export const ManualUploadView: React.FC = () => {
               <div className="flex items-center gap-3 text-xs text-slate-400">
                 <span className="flex items-center gap-1 text-slate-600 font-medium">
                   <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  {uploadResult.article.published_at ? (
+                  {uploadResult.article.pub_date ? (
+                    <span>Published: {uploadResult.article.pub_date}</span>
+                  ) : uploadResult.article.published_at ? (
                     <span>Published: {new Date(uploadResult.article.published_at).toLocaleDateString()}</span>
                   ) : (
                     <span>Publish date unknown</span>
@@ -739,6 +768,32 @@ export const ManualUploadView: React.FC = () => {
                   </>
                 )}
               </div>
+
+              {/* Engine Fallback Reason Banner (if Gemini failed) */}
+              {uploadResult.article.engine_reason && uploadResult.article.ocr_engine !== 'gemini' && (
+                <div className="p-2.5 rounded-lg bg-slate-100 border border-slate-200 text-[11px] text-slate-700 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  <span>{uploadResult.article.engine_reason}</span>
+                </div>
+              )}
+
+              {/* Low Resolution Warning Banner */}
+              {(uploadResult.article.is_low_resolution || uploadResult.article.resolution_warning) && (
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="font-semibold">
+                    {uploadResult.article.resolution_warning || "Image resolution is too low. Upload a higher-resolution file."}
+                  </span>
+                </div>
+              )}
+
+              {/* Unreadable Document Notice */}
+              {(uploadResult.article.unreadable || uploadResult.unreadable) && (
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2 text-xs font-bold text-amber-900">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Text unreadable: please upload a clearer file</span>
+                </div>
+              )}
 
               {/* Headline with interactive toggle */}
               <div>
@@ -763,6 +818,52 @@ export const ManualUploadView: React.FC = () => {
                     </h3>
                   );
                 })()}
+              </div>
+
+              {/* Extracted Document Intelligence Fields Section */}
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2.5 text-xs">
+                <div className="text-[11px] font-mono font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-slate-200/80">
+                  <FileText className="w-3.5 h-3.5 text-purple-600" />
+                  <span>EXTRACTED DOCUMENT INTELLIGENCE</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pb-2 border-b border-slate-200/60 text-xs">
+                  <div>
+                    <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wide">Date:</span>
+                    <span className="text-slate-900 font-medium break-words">
+                      {uploadResult.article.pub_date ||
+                        (uploadResult.article.published_at
+                          ? new Date(uploadResult.article.published_at).toLocaleDateString()
+                          : 'Not found')}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wide">Author:</span>
+                    <span className="text-slate-900 font-medium break-words">
+                      {uploadResult.article.author || 'Not found'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wide">Page:</span>
+                    <span className="text-slate-900 font-medium break-words">
+                      {uploadResult.article.page_no || 'Not found'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1 pt-1">
+                  <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wide">Info:</span>
+                  <p className="text-slate-900 font-normal leading-relaxed break-words whitespace-pre-wrap">
+                    {uploadResult.article.info || 'Not found'}
+                  </p>
+                </div>
+
+                <div className="space-y-1 pt-1">
+                  <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wide">Summary:</span>
+                  <p className="text-slate-900 font-normal leading-relaxed break-words whitespace-pre-wrap">
+                    {uploadResult.article.summary || 'Not found'}
+                  </p>
+                </div>
               </div>
 
               {/* 5-Bullet Brief Section */}

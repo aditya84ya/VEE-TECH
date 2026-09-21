@@ -30,6 +30,17 @@ export interface Article {
   // OCR-specific metadata (set when api_source includes 'epaper_ocr')
   ocrConfidence?: number;
   isLowConfidence?: boolean;
+  ocr_confidence?: number | null;
+  ocr_quality?: 'high' | 'low' | string | null;
+  ocr_engine?: 'gemini' | 'tesseract_ollama' | string | null;
+  engine_reason?: string | null;
+  is_low_resolution?: boolean;
+  resolution_warning?: string | null;
+  unreadable?: boolean;
+  pub_date?: string | null;
+  author?: string | null;
+  page_no?: string | null;
+  info?: string | null;
   matchedTarget?: string;
   ocrDurationMs?: number;
   // Optional content/summary aliases

@@ -20,7 +20,9 @@ import {
   Cpu,
   Radio,
   ArrowDown,
-  Image as ImageIcon
+  Image as ImageIcon,
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
 import { Article } from '../hooks/useWarRoom';
 import { DetectionLatencyBadge } from './DetectionLatencyBadge';
@@ -913,14 +915,17 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                             );
                           })()}
 
-                          {/* Low OCR Confidence Badge — amber pill shown for E-Paper OCR articles */}
-                          {(article.isLowConfidence ||
-                            ((article as any).ocrConfidence !== undefined && (article as any).ocrConfidence < 60)) && (
+                          {/* Low OCR Quality Badge */}
+                          {(article.ocr_quality === 'low' ||
+                            article.isLowConfidence ||
+                            ((article as any).ocrConfidence !== undefined && (article as any).ocrConfidence < 70) ||
+                            ((article as any).ocr_confidence !== undefined && (article as any).ocr_confidence < 70)) && (
                               <span
-                                title="OCR text extraction confidence is under 60%. Some words or numbers may contain optical recognition noise."
-                                className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[9px] uppercase font-bold tracking-wider border border-amber-300 cursor-help"
+                                title="OCR text extraction confidence is under 70%. Verify source text."
+                                className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[9px] uppercase font-bold tracking-wider border border-amber-300 flex items-center gap-1 cursor-help"
                               >
-                                LOW OCR CONFIDENCE
+                                <AlertTriangle className="w-2.5 h-2.5 text-amber-600" />
+                                <span>Low OCR quality: verify the source</span>
                               </span>
                             )}
 
@@ -931,7 +936,7 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                           </span>
                           <span className="text-slate-300">·</span>
                           <span className="text-slate-400 text-[10px]">
-                            {article.published_at ? `Published ${publishedRelativeTime}` : 'Publish date unknown'}
+                            {article.pub_date ? `Published ${article.pub_date}` : article.published_at ? `Published ${publishedRelativeTime}` : 'Publish date unknown'}
                           </span>
 
                           <span className="text-slate-300">•</span>
@@ -1104,6 +1109,57 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                           </span>
                         ))}
                       </div>
+
+                      {/* Extracted Document Intelligence Fields (for manual uploads / scanned docs) */}
+                      {(article.api_source?.toLowerCase().includes('manual') ||
+                        article.author ||
+                        article.pub_date ||
+                        article.page_no ||
+                        article.info) && (
+                        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2 text-xs">
+                          <div className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <FileText className="w-3.5 h-3.5 text-purple-600" />
+                            <span>EXTRACTED DOCUMENT INTELLIGENCE:</span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pb-2 border-b border-slate-200/60 text-xs">
+                            <div>
+                              <span className="text-slate-400 font-semibold block text-[10px] uppercase">Date:</span>
+                              <span className="text-slate-900 font-medium break-words">
+                                {article.pub_date || (article.published_at ? new Date(article.published_at).toLocaleDateString() : 'Not found')}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-semibold block text-[10px] uppercase">Author:</span>
+                              <span className="text-slate-900 font-medium break-words">
+                                {article.author || 'Not found'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-semibold block text-[10px] uppercase">Page:</span>
+                              <span className="text-slate-900 font-medium break-words">
+                                {article.page_no || 'Not found'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 pt-0.5">
+                            <span className="text-slate-400 font-semibold block text-[10px] uppercase">Info:</span>
+                            <p className="text-slate-900 font-normal leading-relaxed break-words whitespace-pre-wrap">
+                              {article.info || 'Not found'}
+                            </p>
+                          </div>
+
+                          <div className="space-y-1 pt-0.5">
+                            <span className="text-slate-400 font-semibold block text-[10px] uppercase">Summary:</span>
+                            <p className="text-slate-900 font-normal leading-relaxed break-words whitespace-pre-wrap">
+                              {typeof article.summary === 'string'
+                                ? article.summary
+                                : (Array.isArray(article.summary) ? article.summary.join(' ') : 'Not found')}
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Progressive Disclosure: Collapsible 5-Bullet Brief */}
                       <div>
