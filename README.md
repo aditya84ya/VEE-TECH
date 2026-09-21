@@ -52,8 +52,9 @@
 10. [Automated Diagnostic & Verification Suite](#automated-diagnostic--verification-suite)
 11. [API Reference](#api-reference)
 12. [Directory Structure](#directory-structure)
-13. [Troubleshooting & FAQs](#troubleshooting--faqs)
-14. [License](#license)
+13. [Technology Stack & Framework Matrix](#technology-stack--framework-matrix)
+14. [Troubleshooting & FAQs](#troubleshooting--faqs)
+15. [License](#license)
 
 ---
 
@@ -578,7 +579,64 @@ VEE-TECH/
 
 ---
 
-## Troubleshooting & FAQs
+## Technology Stack & Framework Matrix
+
+Vee-Alert is built on a hybrid cloud and local-first architecture engineered for microsecond reactivity, high-fidelity AI inference, and reliable zero-downtime execution.
+
+### Architectural Layer Breakdown
+
+| Layer / Subsystem | Technology | Version | Purpose & Responsibilities |
+| :--- | :--- | :--- | :--- |
+| **Frontend Framework** | **React** | `18.3.1` | Reactive component hierarchy, virtual DOM reconciliation, state management |
+| **Language & Typing** | **TypeScript** | `5.5.2` | Compile-time type safety across API responses, article records, and UI props |
+| **Build & Dev Tool** | **Vite** | `5.4.21` | Native ES module dev server, sub-second HMR, and Rollup production bundling |
+| **Styling & Design System**| **Tailwind CSS** | `3.4.4` | Curated slate/rose/emerald design tokens, tactical grid backdrops, dark mode |
+| **Client Routing** | **React Router DOM** | `7.18.4` | Declarative routing with AppShell layout, dynamic outlets, and nested state |
+| **Iconography** | **Lucide React** | `0.395.0` | Comprehensive SVG icons matching corporate executive aesthetic |
+| **Date & Time Utilities** | **date-fns** | `4.4.0` | High-precision ISO date formatting and humanized relative offsets (`1d 2h`) |
+| **Micro-Animations** | **Framer Motion** | `11.2.10` | Hardware-accelerated transitions, drawer slide-ins, and toast animations |
+| **Delight Mechanics** | **Canvas Confetti** | `1.9.3` | Milestone celebration particles upon resolving crisis incidents |
+| **Backend Runtime** | **Node.js** | `>=20.0` | High-throughput asynchronous event loop with native ECMAScript Modules (`ESM`) |
+| **API Server & Routing** | **Express.js** | `4.22.3` | High-speed HTTP middleware pipeline, CORS handling, REST endpoints |
+| **TypeScript Execution** | **tsx** | `4.15.7` | Zero-config TypeScript execution and watcher for backend daemons |
+| **Primary Cloud AI** | **Google Gemini API** | `gemini-3.6-flash` | Multimodal document vision, zero-shot structured JSON extraction, temperature 0 |
+| **Local Offline AI** | **Ollama Engine** | `qwen2.5:7b` | On-premise LLM inference via GPU/CPU with JSON schema output mode |
+| **Computer Vision Engine** | **Sharp** | `0.35.4` | High-performance Libvips image manipulation: grayscale, linear stretch, upscale |
+| **Local OCR Engine** | **Tesseract.js** | `7.0.0` | Multi-threaded WebAssembly OCR worker using English training data and PSM 3 |
+| **PDF Extraction** | **pdf-parse** | `2.4.5` | In-memory text stream decoding for native vector digital PDFs |
+| **Database & WebSockets** | **Supabase (PostgreSQL)** | `2.116.0` | Managed PostgreSQL with row-level security and sub-100ms WebSocket change events |
+| **Streaming Firehose** | **ws (WebSocket)** | `8.21.3` | High-performance WebSocket client connecting directly to Bluesky Jetstream |
+| **HTTP & Scraping Client** | **Axios & Cheerio** | `1.20` / `1.2` | Resilient HTTP requests with TLS bypass, custom headers, and DOM parsing |
+| **Multipart Uploads** | **Multer** | `2.4.0` | Ephemeral RAM file buffer handling with zero disk persistence |
+| **Telephony & DTMF** | **Twilio Voice SDK** | REST / XML | Automated voice escalation simulation with synthetic TTS and interactive DTMF |
+| **Push Notification Rails**| **Slack / WhatsApp / SendGrid** | REST Webhooks | Multi-channel crisis broadcast triggers for executive emergency councils |
+
+---
+
+### Detailed Subsystem Breakdown
+
+#### 1. Frontend Client (`client/`)
+- **App Shell Architecture**: Implements a desktop layout with a collapsible 64px/256px dark sidebar (`Sidebar.tsx`), global status header (`Header.tsx`), and a dedicated mobile bottom navigation bar (`MobileBottomNav.tsx`) with safe-area inset compliance for mobile viewports.
+- **Scroll & Viewport Mechanics**: High-performance passive scroll listeners, reduced-motion detection (`prefers-reduced-motion: reduce`), and auto-detecting scroll-to-top component ([`ScrollToTopButton.tsx`](file:///s:/Web%20project/VEE-TECH/client/src/components/ScrollToTopButton.tsx)).
+- **CSS Design System**:
+  - Semantic HSL/Slate color palettes (`bg-[#F6F7F9]`, `text-slate-900`, `border-slate-200`).
+  - Tactical intelligence dot grid: `.intel-grid-bg` for command room aesthetics.
+  - Custom webkit scrollbars styled in soft slate tones for dense data tables.
+
+#### 2. Backend Server (`server/`)
+- **Dual-Engine Document Extraction**:
+  - Primary: Google Gemini 3.6 Flash multimodal API with automatic fallback cascade (`gemini-3.6-flash` $\to$ `gemini-2.0-flash` $\to$ `gemini-1.5-flash`).
+  - Fallback: Sharp image preprocessor + Tesseract.js (PSM 3) + Ollama `qwen2.5:7b` structured normalizer.
+- **Low-Latency Gateway & Circuit Breakers**:
+  - Independent cooldown states per provider to isolate rate limits (e.g., Google CSE 429 quota isolation).
+  - Pre-database SHA-256 $O(1)$ in-memory hash set preventing redundant database writes.
+- **Deterministic Threat Scorer**:
+  - Transparent rule engine with zero hallucination risk, enforcing critical dictionaries (`arrest`, `fraud`, `trading suspended`, `whistleblower`) and target regexes (`Infosys`, `TCS`, `Wipro`, `Accenture`).
+
+#### 3. Cloud & Infrastructure Services
+- **Supabase Realtime PostgreSQL**: Serves as the authoritative source of truth. Handles real-time WebSocket change subscriptions (`articles-realtime` channel) with immediate replication across all active client dashboards.
+- **Google AI Studio (Gemini)**: Provides multimodal document comprehension, extracting dates, authors, page numbers, and synthesized briefs directly from high-resolution document buffers.
+- **Bluesky Jetstream Nodes**: Subscribes to US-West WebSocket firehose nodes (`wss://jetstream1.us-west.bsky.network`), processing AT-protocol posts at line speed.
 
 ### 1. Port 5000 or 5173 is already in use
 If another background Node or Vite process is holding the port on Windows:
