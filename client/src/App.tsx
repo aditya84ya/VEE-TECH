@@ -162,7 +162,9 @@ function SourcesRoute() {
 // 6. Alerts Route
 function AlertsRoute() {
   const { articles, onEscalateVoice } = useOutletContext<OutletContextType>();
-  const alertArticles = articles.filter((a) => a.risk_level === 'Critical' || a.risk_level === 'High');
+  const alertArticles = articles.filter(
+    (a) => a.risk_level === 'Critical' || (typeof a.risk_score === 'number' && a.risk_score >= 9.0)
+  );
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-8 shadow-2xs space-y-6">
@@ -170,12 +172,12 @@ function AlertsRoute() {
         <Bell className="w-6 h-6 text-rose-600" />
         <div>
           <h2 className="text-xl font-bold text-slate-900">Active High-Priority Alerts</h2>
-          <p className="text-xs text-slate-500">Articles flagged as High or Critical requiring immediate executive response.</p>
+          <p className="text-xs text-slate-500">Articles flagged as Critical requiring immediate executive response.</p>
         </div>
       </div>
       <div className="space-y-3">
         {alertArticles.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">No critical or high risk alerts at this time.</div>
+          <div className="p-8 text-center text-slate-400 text-sm">No critical alerts at this time.</div>
         ) : (
           alertArticles.map((art) => (
             <div key={art.id} className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3">

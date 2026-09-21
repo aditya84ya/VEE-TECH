@@ -40,8 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       title: 'ANALYTICS',
       items: [
-        { path: '/analysis', label: 'Analysis', icon: TrendingUp },
-        { path: '/reports', label: 'Reports', icon: FileText }
+        { path: '/analysis', label: 'Analysis', icon: TrendingUp }
       ]
     },
     {
