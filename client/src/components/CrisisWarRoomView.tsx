@@ -21,13 +21,13 @@ import {
   Radio,
   ArrowDown,
   Image as ImageIcon,
-  FileText,
   AlertTriangle
 } from 'lucide-react';
 import { Article } from '../hooks/useWarRoom';
 import { DetectionLatencyBadge } from './DetectionLatencyBadge';
 import { ArticleLifecycleTimeline } from './ArticleLifecycleTimeline';
 import { calculateAggregateLatencyMetrics, calculateSplitLatencyMetrics } from '../utils/detectionLatency';
+import { ScrollToTopButton } from './ScrollToTopButton';
 
 const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
 
@@ -1110,56 +1110,6 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
                         ))}
                       </div>
 
-                      {/* Extracted Document Intelligence Fields (for manual uploads / scanned docs) */}
-                      {(article.api_source?.toLowerCase().includes('manual') ||
-                        article.author ||
-                        article.pub_date ||
-                        article.page_no ||
-                        article.info) && (
-                        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2 text-xs">
-                          <div className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                            <FileText className="w-3.5 h-3.5 text-purple-600" />
-                            <span>EXTRACTED DOCUMENT INTELLIGENCE:</span>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pb-2 border-b border-slate-200/60 text-xs">
-                            <div>
-                              <span className="text-slate-400 font-semibold block text-[10px] uppercase">Date:</span>
-                              <span className="text-slate-900 font-medium break-words">
-                                {article.pub_date || (article.published_at ? new Date(article.published_at).toLocaleDateString() : 'Not found')}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-slate-400 font-semibold block text-[10px] uppercase">Author:</span>
-                              <span className="text-slate-900 font-medium break-words">
-                                {article.author || 'Not found'}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-slate-400 font-semibold block text-[10px] uppercase">Page:</span>
-                              <span className="text-slate-900 font-medium break-words">
-                                {article.page_no || 'Not found'}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-1 pt-0.5">
-                            <span className="text-slate-400 font-semibold block text-[10px] uppercase">Info:</span>
-                            <p className="text-slate-900 font-normal leading-relaxed break-words whitespace-pre-wrap">
-                              {article.info || 'Not found'}
-                            </p>
-                          </div>
-
-                          <div className="space-y-1 pt-0.5">
-                            <span className="text-slate-400 font-semibold block text-[10px] uppercase">Summary:</span>
-                            <p className="text-slate-900 font-normal leading-relaxed break-words whitespace-pre-wrap">
-                              {typeof article.summary === 'string'
-                                ? article.summary
-                                : (Array.isArray(article.summary) ? article.summary.join(' ') : 'Not found')}
-                            </p>
-                          </div>
-                        </div>
-                      )}
 
                       {/* Progressive Disclosure: Collapsible 5-Bullet Brief */}
                       <div>
@@ -1541,6 +1491,9 @@ export const CrisisWarRoomView: React.FC<CrisisWarRoomViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Floating Scroll-To-Top Button */}
+      <ScrollToTopButton />
     </div>
   );
 };
